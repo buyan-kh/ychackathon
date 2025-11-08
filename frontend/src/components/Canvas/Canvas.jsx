@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Tldraw, createTLStore, defaultShapeUtils } from 'tldraw';
+import { Tldraw, createTLStore, defaultShapeUtils, getSnapshot, loadSnapshot } from 'tldraw';
 import 'tldraw/tldraw.css';
 import { toast } from 'sonner';
 import ConnectionStatus from './ConnectionStatus';
@@ -10,6 +10,7 @@ const backendUrl = process.env.REACT_APP_BACKEND_URL;
 export default function Canvas({ roomId }) {
   const [store, setStore] = useState(null);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
+  const [editor, setEditor] = useState(null);
   const wsRef = useRef(null);
   const reconnectTimeoutRef = useRef(null);
   const reconnectAttempts = useRef(0);
@@ -26,17 +27,17 @@ export default function Canvas({ roomId }) {
 
   // Load initial snapshot
   useEffect(() => {
-    if (!store) return;
+    if (!store || !editor) return;
 
-    const loadSnapshot = async () => {
+    const loadInitialSnapshot = async () => {
       try {
         const response = await fetch(`${backendUrl}/api/sync/rooms/${roomId}/snapshot`);
         if (response.ok) {
           const data = await response.json();
           if (data.snapshot && data.snapshot.store) {
-            // Load the snapshot into the store
+            // Load the snapshot into the store using tldraw v4 API
             try {
-              store.loadSnapshot(data.snapshot);
+              loadSnapshot(editor.store, data.snapshot);
             } catch (error) {
               console.log('No existing snapshot, starting fresh');
             }
@@ -48,8 +49,8 @@ export default function Canvas({ roomId }) {
       }
     };
 
-    loadSnapshot();
-  }, [store, roomId]);
+    loadInitialSnapshot();
+  }, [store, editor, roomId]);
 
   // Setup WebSocket connection
   useEffect(() => {
