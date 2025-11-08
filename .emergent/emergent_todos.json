@@ -1,54 +1,6 @@
 [
   {
-    "content": "Research tldraw sync protocol and best practices for WebSocket implementation",
+    "content": "Fix persistence bug identified by testing agent - update to tldraw v4 API",
     "status": "completed"
-  },
-  {
-    "content": "Install tldraw and @tldraw/sync packages in frontend",
-    "status": "completed"
-  },
-  {
-    "content": "Backend: Create MongoDB models for rooms and operations with UUID support",
-    "status": "completed"
-  },
-  {
-    "content": "Backend: Implement /api/ws/rooms/default WebSocket endpoint for real-time sync",
-    "status": "completed"
-  },
-  {
-    "content": "Backend: Implement /api/sync/rooms/default/snapshot GET endpoint",
-    "status": "completed"
-  },
-  {
-    "content": "Backend: Implement /api/sync/rooms/default/apply POST endpoint for persisting updates",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: Set up basic full-viewport tldraw canvas component",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: Implement sync adapter to connect tldraw with backend (snapshot load + WS streaming)",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: Add connection status indicator with Sonner toasts",
-    "status": "completed"
-  },
-  {
-    "content": "Frontend: Apply design system (Inter font, CSS variables, color tokens) to index.css",
-    "status": "completed"
-  },
-  {
-    "content": "Test POC: Open two browser tabs and verify bi-directional sync works",
-    "status": "completed"
-  },
-  {
-    "content": "Test POC: Verify persistence works on page refresh",
-    "status": "completed"
-  },
-  {
-    "content": "Run comprehensive testing with testing agent",
-    "status": "in_progress"
   }
 ]
