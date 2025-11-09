@@ -1,11 +1,11 @@
 [
   {
     "content": "Web search: Supabase pgvector best practices + OpenAI embeddings + pdfplumber tips",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Call integration playbook agent for OpenAI embeddings integration",
-    "status": "pending"
+    "status": "in_progress"
   },
   {
     "content": "Set up Supabase resources: bucket 'pdfs' + tables (pdf_documents, pdf_chunks) + pgvector extension",
