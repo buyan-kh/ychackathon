@@ -7,11 +7,35 @@ import os
 import uuid
 from typing import List, Dict, Optional
 from datetime import datetime, timezone
-import pdfplumber
-from openai import OpenAI
-from supabase import create_client, Client
-from emergentintegrations.llm.utils import get_integration_proxy_url
 import logging
+
+# Optional imports - handle missing dependencies gracefully
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    PDFPLUMBER_AVAILABLE = False
+
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
+try:
+    from supabase import create_client, Client
+    SUPABASE_AVAILABLE = True
+except ImportError:
+    SUPABASE_AVAILABLE = False
+
+try:
+    from emergentintegrations.llm.utils import get_integration_proxy_url
+    EMERGENT_UTILS_AVAILABLE = True
+except ImportError:
+    EMERGENT_UTILS_AVAILABLE = False
+    # Fallback function if emergentintegrations not available
+    def get_integration_proxy_url():
+        return None
 
 logger = logging.getLogger(__name__)
 

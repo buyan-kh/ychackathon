@@ -2,7 +2,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from emergentintegrations.llm.chat import LlmChat, UserMessage
 import os
 from motor.motor_asyncio import AsyncIOMotorClient
 import json
@@ -15,14 +14,28 @@ import asyncio
 import aiofiles
 from dotenv import load_dotenv
 
-from pdf_processor import PDFProcessor, EmbeddingGenerator, SupabaseRAGStorage
+# Configure logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Optional import for AI chat feature
+try:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    EMERGENT_AVAILABLE = True
+except ImportError:
+    EMERGENT_AVAILABLE = False
+    logger.warning("emergentintegrations not available - AI chat feature will be disabled")
+
+# Optional import for PDF processing
+try:
+    from pdf_processor import PDFProcessor, EmbeddingGenerator, SupabaseRAGStorage
+    PDF_PROCESSING_AVAILABLE = True
+except ImportError:
+    PDF_PROCESSING_AVAILABLE = False
+    logger.warning("pdf_processor not available - PDF upload feature will be disabled")
 
 # Load environment variables
 load_dotenv()
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -50,6 +63,9 @@ async def health_check():
 @app.post("/api/ask")
 async def ask_stream(request: PromptRequest):
     """Stream Claude Sonnet 4 chat completion response"""
+    if not EMERGENT_AVAILABLE:
+        return {"error": "AI chat feature not available - emergentintegrations package not installed"}, 503
+    
     try:
         # Get Emergent LLM key
         api_key = os.getenv("EMERGENT_LLM_KEY")
@@ -99,15 +115,20 @@ async def ask_stream(request: PromptRequest):
     except Exception as e:
         return {"error": str(e)}, 500
 
-# Initialize PDF processor
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Use service role key for backend
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+# Initialize PDF processor (if available)
+if PDF_PROCESSING_AVAILABLE:
+    SUPABASE_URL = os.getenv("SUPABASE_URL")
+    SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Use service role key for backend
+    OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 
-# Initialize with service role key for full permissions
-pdf_processor = PDFProcessor(SUPABASE_URL, SUPABASE_SERVICE_KEY, OPENAI_KEY, openai_base_url=None)
-embedding_gen = EmbeddingGenerator(OPENAI_KEY, base_url=None)
-storage = SupabaseRAGStorage(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+    # Initialize with service role key for full permissions
+    pdf_processor = PDFProcessor(SUPABASE_URL, SUPABASE_SERVICE_KEY, OPENAI_KEY, openai_base_url=None)
+    embedding_gen = EmbeddingGenerator(OPENAI_KEY, base_url=None)
+    storage = SupabaseRAGStorage(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+else:
+    pdf_processor = None
+    embedding_gen = None
+    storage = None
 
 # Pydantic models for PDF endpoints
 class SearchRequest(BaseModel):
@@ -130,6 +151,8 @@ async def upload_pdf(file: UploadFile = File(...)):
     """
     Upload a PDF file, extract text, generate embeddings, and store in Supabase.
     """
+    if not PDF_PROCESSING_AVAILABLE:
+        raise HTTPException(status_code=503, detail="PDF processing feature not available - pdf_processor module not installed")
     try:
         # Validate file type
         if not file.filename.endswith('.pdf'):
@@ -170,6 +193,8 @@ async def get_document(document_id: str):
     """
     Get document metadata by ID.
     """
+    if not PDF_PROCESSING_AVAILABLE or not storage:
+        raise HTTPException(status_code=503, detail="PDF processing feature not available")
     try:
         document = storage.get_document(document_id)
         
@@ -193,6 +218,8 @@ async def list_documents(limit: int = 50, offset: int = 0):
     """
     List all documents with pagination.
     """
+    if not PDF_PROCESSING_AVAILABLE or not storage:
+        raise HTTPException(status_code=503, detail="PDF processing feature not available")
     try:
         documents = storage.list_documents(limit, offset)
         
@@ -216,6 +243,8 @@ async def search_pdfs(request: SearchRequest):
     """
     Perform semantic search on PDF chunks.
     """
+    if not PDF_PROCESSING_AVAILABLE or not embedding_gen or not storage:
+        raise HTTPException(status_code=503, detail="PDF processing feature not available")
     try:
         # Generate embedding for query
         query_embedding = embedding_gen.generate_embeddings([request.query])[0]
