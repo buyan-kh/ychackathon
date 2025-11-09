@@ -19,13 +19,15 @@ const C1ResponseComponent = memo(({ shape, editor }) => {
     if (!contentRef.current || !hasContent) return;
 
     let rafId = null;
-    let timeoutId = null;
+    let debounceTimeoutId = null;
     let isUpdating = false;
+    let lastUpdateTime = 0;
+    const MIN_UPDATE_INTERVAL = 300; // Minimum 300ms between updates
 
     const updateShapeHeight = () => {
       if (!contentRef.current || isUpdating) return;
 
-      // Use requestAnimationFrame to batch updates and prevent ResizeObserver loops
+      // Clear any pending RAF
       if (rafId) {
         cancelAnimationFrame(rafId);
       }
@@ -35,38 +37,58 @@ const C1ResponseComponent = memo(({ shape, editor }) => {
 
         const newHeight = Math.max(200, contentRef.current.scrollHeight + 40);
 
-        // Only update if height changed significantly
-        if (Math.abs(newHeight - shape.props.h) > 10) {
-          isUpdating = true;
+        // Only update if height changed significantly (increased threshold to 20px)
+        if (Math.abs(newHeight - shape.props.h) > 20) {
+          const now = Date.now();
 
-          // Use setTimeout to defer the update and break the ResizeObserver loop
-          timeoutId = setTimeout(() => {
-            try {
-              editor.updateShape({
-                id: shape.id,
-                type: shape.type,
-                props: {
-                  ...shape.props,
-                  h: newHeight,
-                },
-              });
-            } catch (error) {
-              // Silently ignore ResizeObserver errors
-              if (!error?.message?.includes("ResizeObserver")) {
-                console.error("Error updating shape height:", error);
-              }
-            } finally {
-              isUpdating = false;
+          // Throttle updates to prevent rapid flickering
+          if (now - lastUpdateTime < MIN_UPDATE_INTERVAL) {
+            return;
+          }
+
+          isUpdating = true;
+          lastUpdateTime = now;
+
+          try {
+            editor.updateShape({
+              id: shape.id,
+              type: shape.type,
+              props: {
+                ...shape.props,
+                h: newHeight,
+              },
+            });
+          } catch (error) {
+            // Silently ignore ResizeObserver errors
+            if (!error?.message?.includes("ResizeObserver")) {
+              console.error("Error updating shape height:", error);
             }
-          }, 0);
+          } finally {
+            // Delay setting isUpdating to false to prevent immediate re-triggers
+            setTimeout(() => {
+              isUpdating = false;
+            }, 100);
+          }
         }
       });
+    };
+
+    const debouncedUpdate = () => {
+      // Clear any pending debounce
+      if (debounceTimeoutId) {
+        clearTimeout(debounceTimeoutId);
+      }
+
+      // Debounce the update by 150ms
+      debounceTimeoutId = setTimeout(() => {
+        updateShapeHeight();
+      }, 150);
     };
 
     const resizeObserver = new ResizeObserver((entries) => {
       // Wrap in try-catch to prevent ResizeObserver errors from bubbling
       try {
-        updateShapeHeight();
+        debouncedUpdate();
       } catch (error) {
         // Silently ignore ResizeObserver loop errors
         if (!error?.message?.includes("ResizeObserver")) {
@@ -78,20 +100,20 @@ const C1ResponseComponent = memo(({ shape, editor }) => {
     resizeObserver.observe(contentRef.current);
 
     // Initial update with delay to avoid immediate ResizeObserver trigger
-    timeoutId = setTimeout(() => {
+    debounceTimeoutId = setTimeout(() => {
       updateShapeHeight();
-    }, 100);
+    }, 200);
 
     return () => {
       if (rafId) {
         cancelAnimationFrame(rafId);
       }
-      if (timeoutId) {
-        clearTimeout(timeoutId);
+      if (debounceTimeoutId) {
+        clearTimeout(debounceTimeoutId);
       }
       resizeObserver.disconnect();
     };
-  }, [editor, shape.id, shape.type, shape.props.h, hasContent]);
+  }, [editor, shape.id, shape.type, hasContent, shape.props.c1Response]);
 
   if (!hasContent) {
     return (
@@ -138,9 +160,16 @@ const C1ResponseComponent = memo(({ shape, editor }) => {
         gap: "12px",
         overflow: "visible",
         pointerEvents: "all",
+        minHeight: "200px",
       }}
     >
-      <div ref={contentRef} style={{ width: "100%" }}>
+      <div
+        ref={contentRef}
+        style={{
+          width: "100%",
+          willChange: "auto", // Optimize for performance
+        }}
+      >
         {shape.props.prompt && (
           <div
             style={{
@@ -153,6 +182,7 @@ const C1ResponseComponent = memo(({ shape, editor }) => {
               backgroundColor: isDarkMode ? "#1F2937" : "#EFF6FF",
               borderColor: isDarkMode ? "#374151" : "#BFDBFE",
               color: isDarkMode ? "#E5E7EB" : "#1E40AF",
+              boxSizing: "border-box",
             }}
           >
             <span style={{ fontWeight: "600" }}>Q: </span>
@@ -166,6 +196,7 @@ const C1ResponseComponent = memo(({ shape, editor }) => {
               background: isDarkMode ? "#111827" : "#FFFFFF",
               borderRadius: "8px",
               overflow: "hidden",
+              boxSizing: "border-box",
             }}
           >
             <C1Component

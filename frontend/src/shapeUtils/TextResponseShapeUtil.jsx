@@ -54,6 +54,8 @@ const TextResponseComponent = memo(({ shape }) => {
         padding: '16px',
         overflow: 'auto',
         pointerEvents: 'all',
+        boxSizing: 'border-box',
+        minHeight: '200px',
       }}
     >
       {shape.props.prompt && (
@@ -67,6 +69,7 @@ const TextResponseComponent = memo(({ shape }) => {
             backgroundColor: isDarkMode ? '#1F2937' : '#EFF6FF',
             borderColor: isDarkMode ? '#374151' : '#BFDBFE',
             color: isDarkMode ? '#E5E7EB' : '#1E40AF',
+            boxSizing: 'border-box',
           }}
         >
           <span style={{ fontWeight: '600' }}>Prompt: </span>
@@ -86,6 +89,8 @@ const TextResponseComponent = memo(({ shape }) => {
           wordBreak: 'break-word',
           fontSize: '14px',
           lineHeight: '1.6',
+          boxSizing: 'border-box',
+          minHeight: '100px',
         }}
       >
         {shape.props.response}
