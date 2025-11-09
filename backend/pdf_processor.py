@@ -92,9 +92,13 @@ class TextChunker:
 class EmbeddingGenerator:
     """Generate embeddings using OpenAI API"""
     
-    def __init__(self, api_key: str, model: str = "text-embedding-3-small"):
+    def __init__(self, api_key: str, model: str = "text-embedding-3-small", base_url: str = None):
         self.model = model
-        self.client = OpenAI(api_key=api_key)
+        # Configure client with Emergent gateway if using Emergent universal key
+        if base_url:
+            self.client = OpenAI(api_key=api_key, base_url=base_url)
+        else:
+            self.client = OpenAI(api_key=api_key)
         self.logger = logging.getLogger(__name__ + '.EmbeddingGenerator')
     
     def generate_embeddings(self, texts: List[str], batch_size: int = 100) -> List[List[float]]:
