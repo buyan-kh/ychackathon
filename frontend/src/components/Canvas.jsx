@@ -165,6 +165,8 @@ export default function Canvas() {
     const frameHeight = maxY - minY;
 
     let frameId = null;
+    let captureIds = [];
+    let groupId = null;
 
     // Wrap all operations in editor.run for proper history/sync
     editor.run(() => {
@@ -188,8 +190,10 @@ export default function Canvas() {
       // Reparent handwriting strokes into the frame
       editor.reparentShapes(handwritingIds, frameId);
 
+      captureIds = [frameId, ...handwritingIds];
+
       // Group the frame and all strokes (tldraw auto-selects the group)
-      const groupId = editor.groupShapes([frameId, ...handwritingIds]);
+      groupId = editor.groupShapes(captureIds);
 
       // Lock the group shape to prevent resizing (only allow moving)
       if (groupId) {
@@ -205,29 +209,41 @@ export default function Canvas() {
       // Note: No need to manually select - tldraw automatically selects the group after groupShapes()
     });
 
-    // Return frameId for image capture
-    return frameId;
+    if (!frameId) {
+      return null;
+    }
+
+    return {
+      frameId,
+      groupId,
+      captureIds,
+    };
   };
 
   // Helper function to capture and upload frame image
-  const captureAndUploadFrame = async (editor, frameId) => {
-    if (!editor || !frameId) return;
+  const captureAndUploadFrame = async (editor, capturePayload) => {
+    if (!editor || !capturePayload) return;
+
+    const { frameId, captureIds } = capturePayload;
+    const idsToExport = captureIds?.length ? captureIds : frameId ? [frameId] : [];
+
+    if (!idsToExport.length) return;
 
     try {
-      console.log('Starting frame capture for:', frameId);
+      console.log('Starting frame capture for ids:', idsToExport.join(', '));
       
       // Give tldraw a moment to render the frame
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Capture frame as blob using tldraw's export API
-      const blob = await editor.exportToBlob({
-        ids: [frameId],
+      // Capture frame as blob using tldraw's export helpers
+      const imageResult = await editor.toImage(idsToExport, {
         format: 'png',
-        opts: {
-          scale: 2,
-          background: true,
-        },
+        background: true,
+        pixelRatio: 2,
+        padding: 0,
       });
+
+      const blob = imageResult?.blob;
 
       if (!blob) {
         console.error('Failed to capture frame image - blob is null');
@@ -238,23 +254,51 @@ export default function Canvas() {
 
       // Upload to backend
       const formData = new FormData();
-      formData.append('file', blob, `${frameId}.png`);
+
+      if (typeof File !== 'undefined') {
+        const file = new File([blob], `${frameId || 'handwriting-note'}.png`, {
+          type: 'image/png',
+        });
+        formData.append('file', file);
+      } else {
+        formData.append('file', blob, `${frameId || 'handwriting-note'}.png`);
+      }
+
       formData.append('frameId', frameId);
       formData.append('timestamp', new Date().toISOString());
 
       const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
-      console.log('Uploading to:', `${backendUrl}/api/handwriting-upload`);
+      if (!backendUrl) {
+        console.warn('REACT_APP_BACKEND_URL is not set; skipping handwriting upload.');
+        return;
+      }
+      const uploadUrl = `${backendUrl}/api/handwriting-upload`;
+      console.log('Uploading handwriting snapshot to:', uploadUrl);
       
-      const response = await fetch(`${backendUrl}/api/handwriting-upload`, {
+      const response = await fetch(uploadUrl, {
         method: 'POST',
         body: formData,
       });
 
       if (!response.ok) {
-        throw new Error(`Upload failed: ${response.statusText}`);
+        let errorText = '';
+        try {
+          const errorClone = response.clone();
+          errorText = await errorClone.text();
+        } catch (cloneError) {
+          console.warn('Failed to read handwriting upload error body', cloneError);
+        }
+        throw new Error(
+          `Upload failed (${response.status}): ${response.statusText}${errorText ? ` - ${errorText}` : ''}`
+        );
       }
 
-      const data = await response.json();
+      let data = null;
+      try {
+        data = await response.json();
+      } catch (jsonError) {
+        console.warn('Handwriting upload response is not JSON', jsonError);
+      }
       console.log('Frame uploaded successfully:', data);
 
     } catch (error) {
@@ -274,11 +318,11 @@ export default function Canvas() {
           kbd: 's',
           async onSelect() {
             // Create frame and group
-            const frameId = await autoFrameHandwriting(editor);
-            
+            const frameData = await autoFrameHandwriting(editor);
+
             // If frame was created, capture and upload image
-            if (frameId) {
-              await captureAndUploadFrame(editor, frameId);
+            if (frameData) {
+              await captureAndUploadFrame(editor, frameData);
             }
           },
         },

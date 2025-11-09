@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 # from emergentintegrations.llm.chat import LlmChat, UserMessage
 import os
+from pathlib import Path
 # from motor.motor_asyncio import AsyncIOMotorClient
 import json
 from datetime import datetime, timezone
@@ -64,6 +65,11 @@ OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 pdf_processor = PDFProcessor(SUPABASE_URL, SUPABASE_SERVICE_KEY, OPENAI_KEY, openai_base_url=None)
 embedding_gen = EmbeddingGenerator(OPENAI_KEY, base_url=None)
 storage = SupabaseRAGStorage(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+BASE_DIR = Path(__file__).resolve().parent
+HANDWRITING_UPLOAD_DIR = Path(
+    os.getenv("HANDWRITING_UPLOAD_DIR", BASE_DIR / "uploads" / "handwriting")
+)
 
 # Pydantic models for PDF endpoints
 class SearchRequest(BaseModel):
@@ -202,24 +208,41 @@ async def upload_handwriting_image(
 ):
     """Upload handwriting frame image"""
     try:
+        logger.info(
+            "Handwriting upload request received frameId=%s filename=%s content_type=%s",
+            frameId,
+            file.filename,
+            file.content_type,
+        )
         # Create uploads directory if it doesn't exist
-        upload_dir = "/app/backend/uploads/handwriting"
-        os.makedirs(upload_dir, exist_ok=True)
+        HANDWRITING_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
         
         # Generate filename using frameId or timestamp
         filename = f"{frameId or datetime.now(timezone.utc).timestamp()}.png"
-        file_path = os.path.join(upload_dir, filename)
+        file_path = HANDWRITING_UPLOAD_DIR / filename
         
         # Save file asynchronously
-        async with aiofiles.open(file_path, 'wb') as f:
+        async with aiofiles.open(str(file_path), 'wb') as f:
             content = await file.read()
+            content_length = len(content)
+            logger.info(
+                "Saving handwriting image to %s (bytes=%s)",
+                str(file_path),
+                content_length,
+            )
+            if content_length == 0:
+                logger.warning(
+                    "Handwriting image upload has zero bytes (frameId=%s filename=%s)",
+                    frameId,
+                    file.filename,
+                )
             await f.write(content)
         
         logger.info(f"Uploaded handwriting image: {filename}")
         
         return {
             "success": True,
-            "path": file_path,
+            "path": str(file_path),
             "filename": filename,
             "frameId": frameId,
             "timestamp": timestamp
