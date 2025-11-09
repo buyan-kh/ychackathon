@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { track, useEditor } from 'tldraw';
+import { useEditor } from 'tldraw';
 import { createTextResponseShape } from '../utils/textShapeManager';
 
 const isMac = () => {
@@ -10,17 +10,8 @@ export const PromptInput = ({ focusEventName }) => {
   const editor = useEditor();
   const [isFocused, setIsFocused] = useState(false);
   const [prompt, setPrompt] = useState('');
-  const [isCanvasEmpty, setIsCanvasEmpty] = useState(true);
   const showMacKeybinds = isMac();
   const inputRef = useRef(null);
-  
-  // Check canvas state once on mount
-  useEffect(() => {
-    const checkCanvasState = () => {
-      setIsCanvasEmpty(editor.getCurrentPageShapes().length === 0);
-    };
-    checkCanvasState();
-  }, [editor]);
 
   useEffect(() => {
     const handleFocusEvent = () => {
@@ -38,6 +29,9 @@ export const PromptInput = ({ focusEventName }) => {
 
   const onInputSubmit = async (promptText) => {
     setPrompt('');
+    setIsFocused(false);
+    if (inputRef.current) inputRef.current.blur();
+    
     try {
       await createTextResponseShape(editor, {
         searchQuery: promptText,
@@ -58,27 +52,26 @@ export const PromptInput = ({ focusEventName }) => {
         alignItems: 'center',
         position: 'fixed',
         left: '50%',
+        bottom: '16px',
         transform: 'translateX(-50%)',
         padding: '12px 20px',
         borderRadius: '16px',
         border: '1px solid #E5E7EB',
         fontSize: '16px',
-        transition: 'all 0.3s ease-in-out',
+        transition: 'width 0.3s ease-in-out',
         gap: '8px',
         boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
         minHeight: '60px',
         width: isFocused ? '50%' : '400px',
-        top: isCanvasEmpty ? '50%' : 'auto',
-        bottom: isCanvasEmpty ? 'auto' : '16px',
-        marginTop: isCanvasEmpty ? '-30px' : '0',
         background: '#FFFFFF',
         color: '#111827',
+        zIndex: 1000,
       }}
       onSubmit={(e) => {
         e.preventDefault();
-        onInputSubmit(prompt);
-        setIsFocused(false);
-        if (inputRef.current) inputRef.current.blur();
+        if (prompt.trim()) {
+          onInputSubmit(prompt);
+        }
       }}
     >
       <input
