@@ -34,31 +34,28 @@ export default function AIChatOverlay({ editor }) {
     if (!promptText.trim() || isLoading) return;
     
     setIsLoading(true);
-    const noteId = createShapeId();
+    const textId = createShapeId();
     
     // Get viewport center
     const viewport = editor.getViewportPageBounds();
     const x = viewport.x + viewport.w / 2 - 300;
-    const y = viewport.y + viewport.h / 2 - 200;
+    const y = viewport.y + viewport.h / 2 - 100;
     
-    // Create a geo shape (rectangle) with text
+    // Create a text shape for AI response
     editor.createShape({
-      id: noteId,
-      type: 'geo',
+      id: textId,
+      type: 'text',
       x,
       y,
       props: {
-        w: 600,
-        h: 400,
-        geo: 'rectangle',
-        color: 'light-blue',
-        fill: 'solid',
-        text: `Q: ${promptText}\n\nGenerating AI response...`,
+        text: `Q: ${promptText}\n\n🤖 Generating AI response...`,
+        scale: 1.2,
+        autoSize: true,
       },
     });
     
-    // Zoom to the note
-    editor.zoomToSelection([noteId], { duration: 200, inset: 100 });
+    // Zoom to the text
+    editor.zoomToSelection([textId], { duration: 200, inset: 100 });
     
     try {
       // Stream AI response
