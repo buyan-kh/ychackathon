@@ -170,6 +170,21 @@ export default function Canvas() {
 
       // Select the newly created shape
       editor.setSelectedShapes([shapeId]);
+
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+      if (backendUrl && documentData?.document_id) {
+        fetch(`${backendUrl}/api/pdf/canvas-link`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            shapeId,
+            documentId: documentData.document_id,
+            roomId: DEFAULT_ROOM_ID,
+          }),
+        }).catch((error) => {
+          console.error('Failed to create pdf canvas link', error);
+        });
+      }
     }
   };
 

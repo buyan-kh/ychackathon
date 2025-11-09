@@ -267,6 +267,36 @@ async def upload_pdf(file: UploadFile = File(...)):
         logger.error(f"PDF upload failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
 
+
+class PdfCanvasLinkRequest(BaseModel):
+    shapeId: str
+    documentId: str
+    roomId: Optional[str] = None
+
+
+@app.post("/api/pdf/canvas-link")
+async def upsert_pdf_canvas_link(request: PdfCanvasLinkRequest):
+    """
+    Link a canvas PDF shape to a stored document for future context lookup.
+    """
+    try:
+        # Validate document exists
+        document = storage.get_document(request.documentId)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        link = storage.upsert_pdf_canvas_link(
+            shape_id=request.shapeId,
+            document_id=request.documentId,
+            room_id=request.roomId,
+        )
+        return {"success": True, "link": link}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to upsert pdf canvas link: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to link canvas shape")
+
 @app.get("/api/pdf/{document_id}")
 async def get_document(document_id: str):
     """

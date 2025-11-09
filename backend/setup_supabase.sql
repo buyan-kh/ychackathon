@@ -121,6 +121,21 @@ COMMENT ON TABLE pdf_chunks IS 'Stores text chunks and embeddings from PDF docum
 COMMENT ON FUNCTION match_pdf_chunks IS 'Performs semantic similarity search on PDF chunks';
 COMMENT ON FUNCTION get_document_stats IS 'Returns statistics for a specific document';
 
+-- Link PDF canvas shapes to stored documents
+CREATE TABLE IF NOT EXISTS pdf_canvas_links (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    shape_id TEXT UNIQUE NOT NULL,
+    document_id UUID NOT NULL REFERENCES pdf_documents(id) ON DELETE CASCADE,
+    room_id TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pdf_canvas_links_shape_id ON pdf_canvas_links(shape_id);
+CREATE INDEX IF NOT EXISTS idx_pdf_canvas_links_document_id ON pdf_canvas_links(document_id);
+
+COMMENT ON TABLE pdf_canvas_links IS 'Maps canvas PDF shapes to Supabase documents';
+
 -- Handwriting notes tables
 CREATE TABLE IF NOT EXISTS handwriting_notes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

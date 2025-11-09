@@ -327,7 +327,7 @@ class SupabaseRAGStorage:
         except Exception as e:
             self.logger.error(f"Error inserting handwriting chunks: {e}", exc_info=True)
             raise
-    
+
     def insert_document(self, filename: str, storage_path: str, page_count: int, file_size: int) -> str:
         """
         Insert document metadata into pdf_documents table.
@@ -408,6 +408,43 @@ class SupabaseRAGStorage:
             
         except Exception as e:
             self.logger.error(f"Error inserting chunks: {e}")
+            raise
+
+    def upsert_pdf_canvas_link(
+        self,
+        shape_id: str,
+        document_id: str,
+        room_id: Optional[str] = None,
+        metadata: Optional[Dict] = None,
+    ) -> Dict:
+        """
+        Link a canvas shape to a PDF document for provenance.
+        """
+        payload = {
+            "shape_id": shape_id,
+            "document_id": document_id,
+            "room_id": room_id,
+            "metadata": metadata or {},
+        }
+        try:
+            response = self.client.table("pdf_canvas_links").upsert(
+                payload,
+                on_conflict="shape_id",
+                returning='representation'
+            ).execute()
+            link = response.data[0]
+            self.logger.info("Linked PDF shape %s -> document %s", shape_id, document_id)
+            return link
+        except Exception as e:
+            self.logger.error("Failed to upsert pdf_canvas_link: %s", e, exc_info=True)
+            raise
+
+    def delete_pdf_canvas_link(self, shape_id: str) -> None:
+        """Remove a canvas link if the shape is deleted."""
+        try:
+            self.client.table("pdf_canvas_links").delete().eq("shape_id", shape_id).execute()
+        except Exception as e:
+            self.logger.error("Failed to delete pdf_canvas_link: %s", e, exc_info=True)
             raise
     
     def similarity_search(
