@@ -220,13 +220,13 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 
 # Initialize PDF processor
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")  # Use service role key for backend
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 
-# Use litellm with Emergent universal key
-pdf_processor = PDFProcessor(SUPABASE_URL, SUPABASE_KEY, OPENAI_KEY, openai_base_url=None)
+# Initialize with service role key for full permissions
+pdf_processor = PDFProcessor(SUPABASE_URL, SUPABASE_SERVICE_KEY, OPENAI_KEY, openai_base_url=None)
 embedding_gen = EmbeddingGenerator(OPENAI_KEY, base_url=None)
-storage = SupabaseRAGStorage(SUPABASE_URL, SUPABASE_KEY)
+storage = SupabaseRAGStorage(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 # Pydantic models for PDF endpoints
 class SearchRequest(BaseModel):
