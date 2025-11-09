@@ -19,6 +19,90 @@
       Learn how to configure a non-root public URL by running `npm run build`.
     -->
         <title>Emergent | Fullstack App</title>
+        <!-- Suppress ResizeObserver errors -->
+        <script>
+            // Suppress ResizeObserver errors in development - MUST run before React loads
+            (function() {
+                const originalConsoleError = console.error;
+                const originalConsoleWarn = console.warn;
+                
+                // Override console.error to filter ResizeObserver errors
+                console.error = function(...args) {
+                    const message = args[0]?.toString() || '';
+                    if (message.includes('ResizeObserver loop') || 
+                        message.includes('ResizeObserver loop completed') ||
+                        message.includes('ResizeObserver loop limit exceeded')) {
+                        return;
+                    }
+                    originalConsoleError.apply(console, args);
+                };
+                
+                // Override console.warn as well (React sometimes uses warn)
+                console.warn = function(...args) {
+                    const message = args[0]?.toString() || '';
+                    if (message.includes('ResizeObserver loop') || 
+                        message.includes('ResizeObserver loop completed') ||
+                        message.includes('ResizeObserver loop limit exceeded')) {
+                        return;
+                    }
+                    originalConsoleWarn.apply(console, args);
+                };
+                
+                // Catch errors before React's error overlay (capture phase)
+                window.addEventListener('error', (e) => {
+                    const message = e.message || e.toString() || '';
+                    if (message.includes('ResizeObserver loop') || 
+                        message.includes('ResizeObserver loop completed') ||
+                        message.includes('ResizeObserver loop limit exceeded')) {
+                        e.stopImmediatePropagation();
+                        e.stopPropagation();
+                        e.preventDefault();
+                        return true;
+                    }
+                }, true);
+                
+                // Catch unhandled promise rejections
+                window.addEventListener('unhandledrejection', (e) => {
+                    const reason = e.reason;
+                    const message = reason?.message || reason?.toString() || '';
+                    if (message.includes('ResizeObserver loop') || 
+                        message.includes('ResizeObserver loop completed') ||
+                        message.includes('ResizeObserver loop limit exceeded')) {
+                        e.stopImmediatePropagation();
+                        e.stopPropagation();
+                        e.preventDefault();
+                        return true;
+                    }
+                }, true);
+                
+                // Additional protection: monitor for React error overlay and suppress ResizeObserver errors
+                const checkAndSuppress = () => {
+                    // Check if React error overlay exists and suppress ResizeObserver errors
+                    if (window.__REACT_ERROR_OVERLAY_GLOBAL_HOOK__) {
+                        const hook = window.__REACT_ERROR_OVERLAY_GLOBAL_HOOK__;
+                        if (hook.onError) {
+                            const originalOnError = hook.onError;
+                            hook.onError = function(errors) {
+                                const filtered = errors.filter(err => {
+                                    const msg = err?.message || err?.toString() || '';
+                                    return !(msg.includes('ResizeObserver loop') || 
+                                           msg.includes('ResizeObserver loop completed') ||
+                                           msg.includes('ResizeObserver loop limit exceeded'));
+                                });
+                                if (filtered.length > 0) {
+                                    originalOnError.call(this, filtered);
+                                }
+                            };
+                        }
+                    }
+                };
+                
+                // Try to suppress immediately and after a delay (when React loads)
+                checkAndSuppress();
+                setTimeout(checkAndSuppress, 1000);
+                setTimeout(checkAndSuppress, 3000);
+            })();
+        </script>
         <!-- Temporarily commented out - conflicts with streaming responses -->
         <!-- <script src="https://assets.emergent.sh/scripts/emergent-main.js"></script> -->
         <!--

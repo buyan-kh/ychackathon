@@ -17,31 +17,80 @@ const C1ResponseComponent = memo(({ shape, editor }) => {
   useLayoutEffect(() => {
     if (!contentRef.current || !hasContent) return;
 
+    let rafId = null;
+    let timeoutId = null;
+    let isUpdating = false;
+
     const updateShapeHeight = () => {
-      if (!contentRef.current) return;
+      if (!contentRef.current || isUpdating) return;
       
-      const newHeight = Math.max(200, contentRef.current.scrollHeight + 40);
-      
-      if (Math.abs(newHeight - shape.props.h) > 10) {
-        editor.updateShape({
-          id: shape.id,
-          type: shape.type,
-          props: {
-            ...shape.props,
-            h: newHeight,
-          },
-        });
+      // Use requestAnimationFrame to batch updates and prevent ResizeObserver loops
+      if (rafId) {
+        cancelAnimationFrame(rafId);
       }
+      
+      rafId = requestAnimationFrame(() => {
+        if (!contentRef.current) return;
+        
+        const newHeight = Math.max(200, contentRef.current.scrollHeight + 40);
+        
+        // Only update if height changed significantly
+        if (Math.abs(newHeight - shape.props.h) > 10) {
+          isUpdating = true;
+          
+          // Use setTimeout to defer the update and break the ResizeObserver loop
+          timeoutId = setTimeout(() => {
+            try {
+              editor.updateShape({
+                id: shape.id,
+                type: shape.type,
+                props: {
+                  ...shape.props,
+                  h: newHeight,
+                },
+              });
+            } catch (error) {
+              // Silently ignore ResizeObserver errors
+              if (!error?.message?.includes('ResizeObserver')) {
+                console.error('Error updating shape height:', error);
+              }
+            } finally {
+              isUpdating = false;
+            }
+          }, 0);
+        }
+      });
     };
 
-    const resizeObserver = new ResizeObserver(updateShapeHeight);
+    const resizeObserver = new ResizeObserver((entries) => {
+      // Wrap in try-catch to prevent ResizeObserver errors from bubbling
+      try {
+        updateShapeHeight();
+      } catch (error) {
+        // Silently ignore ResizeObserver loop errors
+        if (!error?.message?.includes('ResizeObserver')) {
+          console.error('ResizeObserver error:', error);
+        }
+      }
+    });
+    
     resizeObserver.observe(contentRef.current);
     
-    // Initial update
-    updateShapeHeight();
+    // Initial update with delay to avoid immediate ResizeObserver trigger
+    timeoutId = setTimeout(() => {
+      updateShapeHeight();
+    }, 100);
     
-    return () => resizeObserver.disconnect();
-  }, [editor, shape.id, shape.type, shape.props, hasContent]);
+    return () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId);
+      }
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      resizeObserver.disconnect();
+    };
+  }, [editor, shape.id, shape.type, shape.props.h, hasContent]);
 
   if (!hasContent) {
     return (

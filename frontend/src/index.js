@@ -11,9 +11,10 @@ const resizeObserverLoopErr = /^[^(ResizeObserver loop limit exceeded|ResizeObse
 const consoleError = console.error;
 console.error = (...args) => {
   const firstArg = args[0];
-  if (typeof firstArg === 'string' && 
-      (firstArg.includes('ResizeObserver loop') || 
-       firstArg.includes('ResizeObserver loop completed with undelivered notifications'))) {
+  const message = typeof firstArg === 'string' ? firstArg : firstArg?.toString() || '';
+  if (message.includes('ResizeObserver loop') || 
+      message.includes('ResizeObserver loop completed') ||
+      message.includes('ResizeObserver loop limit exceeded')) {
     return;
   }
   consoleError(...args);
