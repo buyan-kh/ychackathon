@@ -83,17 +83,27 @@ async def get_or_create_video_room(request: VideoRoomRequest):
 
         # Try to get existing room first
         get_url = f"https://api.daily.co/v1/rooms/{room_name}"
-        response = requests.get(get_url, headers=headers)
+        get_response = requests.get(get_url, headers=headers)
 
-        if response.status_code == 200:
+        if get_response.status_code == 200:
             # Room exists
-            room_data = response.json()
+            room_data = get_response.json()
             logger.info(f"Found existing Daily.co room: {room_name}")
             return {
                 "url": room_data["url"],
                 "room_name": room_data["name"],
                 "created": False
             }
+        elif get_response.status_code == 404:
+            # Room doesn't exist, create it
+            logger.info(f"Room {room_name} not found, creating new room")
+        else:
+            # Other error from GET request (e.g., 401, 403, 500)
+            logger.error(f"Daily.co API GET error: {get_response.status_code} - {get_response.text}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to check Daily.co room: {get_response.text}"
+            )
 
         # Room doesn't exist, create it
         create_url = "https://api.daily.co/v1/rooms"
@@ -108,10 +118,10 @@ async def get_or_create_video_room(request: VideoRoomRequest):
             }
         }
 
-        response = requests.post(create_url, headers=headers, json=room_config)
+        create_response = requests.post(create_url, headers=headers, json=room_config)
 
-        if response.status_code in [200, 201]:
-            room_data = response.json()
+        if create_response.status_code in [200, 201]:
+            room_data = create_response.json()
             logger.info(f"Created new Daily.co room: {room_name}")
             return {
                 "url": room_data["url"],
@@ -119,10 +129,10 @@ async def get_or_create_video_room(request: VideoRoomRequest):
                 "created": True
             }
         else:
-            logger.error(f"Daily.co API error: {response.status_code} - {response.text}")
+            logger.error(f"Daily.co API POST error: {create_response.status_code} - {create_response.text}")
             raise HTTPException(
-                status_code=response.status_code,
-                detail=f"Failed to create Daily.co room: {response.text}"
+                status_code=500,
+                detail=f"Failed to create Daily.co room: {create_response.text}"
             )
 
     except HTTPException:

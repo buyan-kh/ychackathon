@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createShapeId, useEditor } from 'tldraw';
+import { getOptimalShapePosition, centerCameraOnShape } from '../utils/shapePositioning';
 
 const backendUrl = process.env.REACT_APP_BACKEND_URL;
 
@@ -13,7 +14,6 @@ export default function PromptInput({ focusEventName }) {
   const [prompt, setPrompt] = useState('');
   const showMacKeybinds = isMac();
   const inputRef = useRef(null);
-  const isCanvasEmpty = editor.getCurrentPageShapes().length === 0;
 
   const clamp01 = (value) => Math.max(0, Math.min(1, value));
 
@@ -115,18 +115,20 @@ export default function PromptInput({ focusEventName }) {
     const selectedShapeIds = editor.getSelectedShapeIds();
     const c1ShapeId = createShapeId();
     
-    // Get viewport center
-    const viewport = editor.getViewportPageBounds();
-    const x = viewport.x + (viewport.w / 2) - 300;
-    const y = viewport.y + (viewport.h / 2) - 150;
+    // Calculate optimal position for the new shape
+    const position = getOptimalShapePosition(editor, {
+      width: 600,
+      height: 300,
+      padding: 50,
+    });
     
     // Create C1 Response shape ON THE CANVAS
     editor.run(() => {
       editor.createShape({
         id: c1ShapeId,
         type: 'c1-response',
-        x,
-        y,
+        x: position.x,
+        y: position.y,
         props: {
           w: 600,
           h: 300,
@@ -141,11 +143,16 @@ export default function PromptInput({ focusEventName }) {
       }
     });
     
-    // Zoom to the shape
-    editor.zoomToSelection([c1ShapeId], { duration: 200, inset: 100 });
+    // Automatically center camera on the new shape after a brief delay
+    // to ensure the shape is fully rendered
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        centerCameraOnShape(editor, c1ShapeId, { duration: 300 });
+      }, 100);
+    });
     
     try {
-      const apiUrl = backendUrl || 'http://localhost:8001';
+      const apiUrl = backendUrl || 'http://localhost:8000';
       console.log('Fetching from:', `${apiUrl}/api/ask`);
       
       // Stream AI response

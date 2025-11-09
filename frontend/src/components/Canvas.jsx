@@ -47,7 +47,7 @@ export default function Canvas() {
   // Handle video call join - create as draggable canvas shape
   const handleJoinVideoCall = async () => {
     try {
-      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8001';
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
       const response = await axios.post(`${backendUrl}/api/video/room`, {
         room_id: DEFAULT_ROOM_ID
       });
@@ -79,7 +79,8 @@ export default function Canvas() {
       }
     } catch (error) {
       console.error('Failed to get video room:', error);
-      alert('Failed to join video call. Please try again.');
+      const errorMessage = error.response?.data?.detail || error.response?.data?.message || error.message || 'Unknown error occurred';
+      alert(`Failed to join video call: ${errorMessage}`);
     }
   };
 
