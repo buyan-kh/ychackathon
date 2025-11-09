@@ -218,6 +218,144 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
         print(f"WebSocket error: {e}")
         manager.disconnect(websocket, room_id)
 
+# Initialize PDF processor
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+
+pdf_processor = PDFProcessor(SUPABASE_URL, SUPABASE_KEY, OPENAI_KEY)
+embedding_gen = EmbeddingGenerator(OPENAI_KEY)
+storage = SupabaseRAGStorage(SUPABASE_URL, SUPABASE_KEY)
+
+# Pydantic models for PDF endpoints
+class SearchRequest(BaseModel):
+    query: str
+    limit: int = 10
+    threshold: float = 0.7
+    document_id: Optional[str] = None
+
+class SearchResult(BaseModel):
+    id: str
+    document_id: str
+    chunk_text: str
+    page_number: int
+    similarity: float
+    metadata: dict
+
+# PDF Endpoints
+@app.post("/api/pdf/upload")
+async def upload_pdf(file: UploadFile = File(...)):
+    """
+    Upload a PDF file, extract text, generate embeddings, and store in Supabase.
+    """
+    try:
+        # Validate file type
+        if not file.filename.endswith('.pdf'):
+            raise HTTPException(status_code=400, detail="Only PDF files are allowed")
+        
+        # Validate file size (20MB limit)
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(0)
+        
+        if file_size > 20 * 1024 * 1024:  # 20MB
+            raise HTTPException(status_code=400, detail="File size exceeds 20MB limit")
+        
+        # Save to temporary file
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            content = await file.read()
+            temp_file.write(content)
+            temp_path = temp_file.name
+        
+        try:
+            # Process the PDF
+            result = await pdf_processor.process_pdf(temp_path, file.filename)
+            return JSONResponse(content=result, status_code=200)
+            
+        finally:
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"PDF upload failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
+
+@app.get("/api/pdf/{document_id}")
+async def get_document(document_id: str):
+    """
+    Get document metadata by ID.
+    """
+    try:
+        document = storage.get_document(document_id)
+        
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+        
+        # Add public URL
+        public_url = storage.get_public_url(document['storage_path'])
+        document['public_url'] = public_url
+        
+        return document
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/pdf/documents")
+async def list_documents(limit: int = 50, offset: int = 0):
+    """
+    List all documents with pagination.
+    """
+    try:
+        documents = storage.list_documents(limit, offset)
+        
+        # Add public URLs
+        for doc in documents:
+            doc['public_url'] = storage.get_public_url(doc['storage_path'])
+        
+        return {
+            "documents": documents,
+            "count": len(documents),
+            "limit": limit,
+            "offset": offset
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to list documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/pdf/search")
+async def search_pdfs(request: SearchRequest):
+    """
+    Perform semantic search on PDF chunks.
+    """
+    try:
+        # Generate embedding for query
+        query_embedding = embedding_gen.generate_embeddings([request.query])[0]
+        
+        # Search
+        results = storage.similarity_search(
+            query_embedding=query_embedding,
+            limit=request.limit,
+            threshold=request.threshold,
+            document_id=request.document_id
+        )
+        
+        return {
+            "query": request.query,
+            "results": results,
+            "count": len(results)
+        }
+        
+    except Exception as e:
+        logger.error(f"Search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8001)
