@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { createShapeId } from 'tldraw';
+import { createShapeId, toRichText } from 'tldraw';
 
 const backendUrl = process.env.REACT_APP_BACKEND_URL;
 
