@@ -168,12 +168,87 @@ export default function PromptInput({ focusEventName }) {
     const selectedShapeIds = resolveSelectionForContext();
     const c1ShapeId = createShapeId();
     
-    // Calculate optimal position for the new shape
-    const position = getOptimalShapePosition(editor, {
-      width: 600,
-      height: 300,
-      padding: 50,
-    });
+    const newShapeWidth = 600;
+    const newShapeHeight = 300;
+    const padding = 50;
+
+    // Helper function to check if a position would overlap with existing shapes
+    const checkOverlap = (x, y) => {
+      const existingShapes = editor.getCurrentPageShapes();
+      return existingShapes.some((shape) => {
+        const bounds = editor.getShapePageBounds(shape.id);
+        if (!bounds) return false;
+
+        return !(
+          x + newShapeWidth + padding <= bounds.x ||
+          x - padding >= bounds.x + bounds.w ||
+          y + newShapeHeight + padding <= bounds.y ||
+          y - padding >= bounds.y + bounds.h
+        );
+      });
+    };
+
+    // Try to position relative to the first selected shape
+    let position;
+    if (selectedShapeIds.length > 0) {
+      const firstSelectedId = selectedShapeIds[0];
+      const shapePageBounds = editor.getShapePageBounds(firstSelectedId);
+
+      if (shapePageBounds) {
+        // Define positions relative to the selected shape in priority order
+        const positions = [
+          {
+            // Right
+            x: shapePageBounds.maxX + padding,
+            y: shapePageBounds.center.y - newShapeHeight / 2,
+          },
+          {
+            // Below
+            x: shapePageBounds.center.x - newShapeWidth / 2,
+            y: shapePageBounds.maxY + padding,
+          },
+          {
+            // Left
+            x: shapePageBounds.x - newShapeWidth - padding,
+            y: shapePageBounds.center.y - newShapeHeight / 2,
+          },
+          {
+            // Above
+            x: shapePageBounds.center.x - newShapeWidth / 2,
+            y: shapePageBounds.y - newShapeHeight - padding,
+          },
+        ];
+
+        // Find first position that doesn't overlap
+        const validPosition = positions.find((pos) => !checkOverlap(pos.x, pos.y));
+
+        if (validPosition) {
+          // Use the first valid position relative to selected shape
+          position = validPosition;
+        } else {
+          // All relative positions overlap, fall back to global optimal positioning
+          position = getOptimalShapePosition(editor, {
+            width: newShapeWidth,
+            height: newShapeHeight,
+            padding,
+          });
+        }
+      } else {
+        // Fallback to optimal positioning if shape bounds can't be determined
+        position = getOptimalShapePosition(editor, {
+          width: newShapeWidth,
+          height: newShapeHeight,
+          padding,
+        });
+      }
+    } else {
+      // No selection, use global optimal positioning
+      position = getOptimalShapePosition(editor, {
+        width: newShapeWidth,
+        height: newShapeHeight,
+        padding,
+      });
+    }
     
     // Create C1 Response shape ON THE CANVAS
     editor.run(() => {
