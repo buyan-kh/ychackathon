@@ -1,6 +1,10 @@
 [
   {
-    "content": "Fix persistence bug identified by testing agent - update to tldraw v4 API",
+    "content": "Implement auto-frame handwriting feature (Canvas.jsx) - capture editor on mount, add autoFrameHandwriting helper, configure 's' key override",
     "status": "completed"
+  },
+  {
+    "content": "Test auto-frame functionality - verify frame creation, reparenting, grouping, and native TLDraw behaviors (undo, delete, multiplayer sync)",
+    "status": "in_progress"
   }
 ]
