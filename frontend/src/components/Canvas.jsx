@@ -4,7 +4,7 @@ import { useSyncDemo } from '@tldraw/sync';
 import { createShapeId } from '@tldraw/editor';
 import PromptInput from './PromptInput';
 import { PdfUploadButton } from './PdfUploadButton';
-import { PdfViewer } from './PdfViewer';
+import { PdfShapeUtil } from '../shapeUtils/PdfShapeUtil';
 import 'tldraw/tldraw.css';
 
 const FOCUS_EVENT_NAME = 'focus-prompt-input';
@@ -28,13 +28,16 @@ const components = {
   InFrontOfTheCanvas: CustomUI,
 };
 
+// Custom shape utilities
+const customShapeUtils = [PdfShapeUtil];
+
 export default function Canvas() {
-  const [uploadedDocuments, setUploadedDocuments] = useState([]);
   const editorRef = useRef(null);
 
-  // Use tldraw's built-in demo sync
+  // Use tldraw's built-in demo sync with custom shapes
   const store = useSyncDemo({
     roomId: 'default',
+    shapeUtils: customShapeUtils,
   });
 
   // Register Cmd+K shortcut
@@ -77,11 +80,34 @@ export default function Canvas() {
 
   const handleUploadSuccess = (documentData) => {
     console.log('PDF uploaded successfully:', documentData);
-    setUploadedDocuments(prev => [...prev, documentData]);
-  };
 
-  const handleClosePdf = (documentId) => {
-    setUploadedDocuments(prev => prev.filter(doc => doc.document_id !== documentId));
+    // Create a PDF shape on the canvas
+    if (editorRef.current) {
+      const editor = editorRef.current;
+      const shapeId = createShapeId();
+
+      // Get viewport center using viewportPageBounds
+      const viewport = editor.getViewportPageBounds();
+      const centerX = viewport.x + viewport.w / 2;
+      const centerY = viewport.y + viewport.h / 2;
+
+      editor.createShape({
+        id: shapeId,
+        type: 'pdf-viewer',
+        x: centerX - 300, // Center the shape (half of default width)
+        y: centerY - 400, // Center the shape (half of default height)
+        props: {
+          documentUrl: documentData.public_url,
+          documentId: documentData.document_id,
+          filename: documentData.filename,
+          w: 600,
+          h: 800,
+        },
+      });
+
+      // Select the newly created shape
+      editor.setSelectedShapes([shapeId]);
+    }
   };
 
   // Helper function to auto-frame handwriting strokes and capture image
@@ -273,39 +299,16 @@ export default function Canvas() {
         alignItems: 'center'
       }}>
         <PdfUploadButton onUploadSuccess={handleUploadSuccess} />
-        {uploadedDocuments.length > 0 && (
-          <div style={{
-            padding: '8px 12px',
-            background: 'white',
-            borderRadius: '8px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-            fontSize: '12px',
-            fontWeight: '500',
-            color: '#64748B'
-          }} data-testid="pdf-counter">
-            {uploadedDocuments.length} PDF{uploadedDocuments.length !== 1 ? 's' : ''} uploaded
-          </div>
-        )}
       </div>
-      
+
       {/* tldraw canvas */}
-      <Tldraw 
+      <Tldraw
         store={store}
         components={components}
         onMount={handleMount}
         overrides={overrides}
+        shapeUtils={customShapeUtils}
       />
-
-      {/* Render uploaded PDFs */}
-      {uploadedDocuments.map((doc, index) => (
-        <PdfViewer
-          key={doc.document_id}
-          documentUrl={doc.public_url}
-          documentId={doc.document_id}
-          position={{ x: 100 + (index * 50), y: 100 + (index * 50) }}
-          onClose={() => handleClosePdf(doc.document_id)}
-        />
-      ))}
     </div>
   );
 }
