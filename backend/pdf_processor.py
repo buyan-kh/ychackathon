@@ -18,8 +18,50 @@ from PIL import Image, ImageEnhance, ImageFilter
 import pytesseract
 from pytesseract import Output
 from postgrest import APIError
+import re
+import unicodedata
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_filename(filename: str) -> str:
+    """
+    Sanitize filename to only include S3-safe characters.
+    Removes or replaces invalid characters for Supabase storage.
+
+    Supabase Storage only accepts: a-z, A-Z, 0-9, /, !, -, ., *, ', (, ),
+    space, &, $, @, =, ;, :, +, ,, ?
+
+    This function:
+    - Normalizes unicode characters (converts special chars to ASCII equivalents)
+    - Removes non-ASCII characters
+    - Replaces unsafe characters with underscores
+    - Cleans up consecutive underscores
+    """
+    if not filename:
+        return "unnamed_file"
+
+    # Normalize unicode characters (e.g., é -> e, non-breaking space -> space)
+    filename = unicodedata.normalize('NFKD', filename)
+
+    # Remove or replace non-ASCII characters
+    filename = filename.encode('ascii', 'ignore').decode('ascii')
+
+    # Replace unsafe characters with underscores (keep only: alphanumeric, -, _, ., (, ))
+    # This preserves the file extension and makes it readable
+    filename = re.sub(r'[^\w\-\.\(\)]', '_', filename)
+
+    # Remove consecutive underscores
+    filename = re.sub(r'_+', '_', filename)
+
+    # Remove leading/trailing underscores or dots
+    filename = filename.strip('_.')
+
+    # Ensure we still have a filename after sanitization
+    if not filename:
+        return "unnamed_file"
+
+    return filename
 
 
 class PDFExtractor:
@@ -151,8 +193,12 @@ class SupabaseRAGStorage:
         Upload PDF file to Supabase Storage.
         Returns: Storage path of uploaded file
         """
-        storage_path = f"{uuid.uuid4()}/{filename}"
-        
+        # Sanitize the filename to remove special characters that Supabase Storage doesn't support
+        sanitized_filename = sanitize_filename(filename)
+        storage_path = f"{uuid.uuid4()}/{sanitized_filename}"
+
+        self.logger.info(f"Uploading PDF: {filename} -> {sanitized_filename}")
+
         try:
             with open(file_path, 'rb') as f:
                 self.client.storage.from_(self.bucket_name).upload(
@@ -160,10 +206,10 @@ class SupabaseRAGStorage:
                     file=f,
                     file_options={"content-type": "application/pdf"}
                 )
-            
+
             self.logger.info(f"Uploaded PDF to: {storage_path}")
             return storage_path
-            
+
         except Exception as e:
             self.logger.error(f"Error uploading PDF: {e}")
             raise
@@ -178,7 +224,11 @@ class SupabaseRAGStorage:
         Upload handwriting snapshot to Supabase Storage.
         Returns: Storage path of uploaded file
         """
-        storage_path = f"{uuid.uuid4()}/{filename}"
+        # Sanitize the filename to remove special characters
+        sanitized_filename = sanitize_filename(filename)
+        storage_path = f"{uuid.uuid4()}/{sanitized_filename}"
+
+        self.logger.info(f"Uploading handwriting image: {filename} -> {sanitized_filename}")
 
         tmp_file = tempfile.NamedTemporaryFile(delete=False)
         try:

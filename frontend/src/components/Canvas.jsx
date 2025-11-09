@@ -773,9 +773,8 @@ export default function Canvas() {
         meta: {
           handwritingNoteId: frameId,
           handwritingStrokeIds: handwritingIds,
-          noteColor: "#FBBF24", // Yellow color for handwriting notes
         },
-        opacity: 0.2,
+        opacity: 1,
       });
 
       // Send frame to back so it appears behind the strokes
@@ -1119,9 +1118,8 @@ const autoFrameTypedText = async (editor, seedTextIds) => {
       },
       meta: {
         typedNoteId: frameId,
-        noteColor: "#FBBF24", // Yellow color for typed notes
       },
-      opacity: 0.2,
+      opacity: 1,
     });
 
     editor.reparentShapes(textIds, frameId);

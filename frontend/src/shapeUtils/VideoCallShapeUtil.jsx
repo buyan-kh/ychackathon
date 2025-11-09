@@ -12,6 +12,8 @@ const VideoCallComponent = memo(({ shape }) => {
   const [callFrame, setCallFrame] = useState(null);
   const [error, setError] = useState(null);
   const transcriptChunksRef = useRef([]);
+  const summaryGeneratedRef = useRef(false); // Prevent duplicate summary generation
+  const eventListenersRegisteredRef = useRef(false); // Prevent duplicate event listeners
 
   const roomUrl = shape.props.roomUrl;
 
@@ -245,31 +247,43 @@ const VideoCallComponent = memo(({ shape }) => {
       setCallFrame(frame);
 
       // Handle leave event - generate streaming summary from transcript
-      frame.on('left-meeting', async () => {
-        console.log('👋 User left meeting');
+      // Only register this once to prevent duplicate summaries
+      if (!eventListenersRegisteredRef.current) {
+        frame.on('left-meeting', async () => {
+          console.log('👋 User left meeting');
 
-        try {
-          // Note: Transcription automatically stops when leaving, no need to call stopTranscription()
-          console.log('📝 Processing transcript...');
-
-          // Get full transcript
-          const fullTranscript = transcriptChunksRef.current.join(' ').trim();
-          console.log('📝 Full transcript captured:', fullTranscript);
-          console.log('📊 Transcript length:', fullTranscript.length, 'characters');
-          console.log('📊 Number of chunks:', transcriptChunksRef.current.length);
-
-          if (fullTranscript.length > 0) {
-            // Create streaming summary using C1 pattern
-            await createStreamingSummary(fullTranscript);
-          } else {
-            console.warn('⚠️  No transcript captured - cannot generate summary');
-            console.warn('Make sure you spoke during the call for transcription to work');
+          // Prevent duplicate summary generation
+          if (summaryGeneratedRef.current) {
+            console.log('⚠️  Summary already generated, skipping duplicate');
+            return;
           }
-        } catch (error) {
-          console.error('❌ Error generating summary:', error);
-          console.error('Error details:', error.message);
-        }
-      });
+          summaryGeneratedRef.current = true;
+
+          try {
+            // Note: Transcription automatically stops when leaving, no need to call stopTranscription()
+            console.log('📝 Processing transcript...');
+
+            // Get full transcript
+            const fullTranscript = transcriptChunksRef.current.join(' ').trim();
+            console.log('📝 Full transcript captured:', fullTranscript);
+            console.log('📊 Transcript length:', fullTranscript.length, 'characters');
+            console.log('📊 Number of chunks:', transcriptChunksRef.current.length);
+
+            if (fullTranscript.length > 0) {
+              // Create streaming summary using C1 pattern
+              await createStreamingSummary(fullTranscript);
+            } else {
+              console.warn('⚠️  No transcript captured - cannot generate summary');
+              console.warn('Make sure you spoke during the call for transcription to work');
+            }
+          } catch (error) {
+            console.error('❌ Error generating summary:', error);
+            console.error('Error details:', error.message);
+          }
+        });
+
+        eventListenersRegisteredRef.current = true;
+      }
 
       frame.on('error', (error) => {
         console.error('Daily error:', error);
