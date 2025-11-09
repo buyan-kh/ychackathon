@@ -8,8 +8,9 @@ import uuid
 from typing import List, Dict, Optional
 from datetime import datetime, timezone
 import pdfplumber
-from litellm import embedding
+from openai import OpenAI
 from supabase import create_client, Client
+from emergentintegrations.llm.utils import get_integration_proxy_url
 import logging
 
 logger = logging.getLogger(__name__)
