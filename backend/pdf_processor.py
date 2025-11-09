@@ -286,10 +286,10 @@ class SupabaseRAGStorage:
 class PDFProcessor:
     """Main class coordinating the entire PDF processing pipeline"""
     
-    def __init__(self, supabase_url: str, supabase_key: str, openai_key: str):
+    def __init__(self, supabase_url: str, supabase_key: str, openai_key: str, openai_base_url: str = None):
         self.extractor = PDFExtractor()
         self.chunker = TextChunker(chunk_size=1000, overlap=200)
-        self.embedding_gen = EmbeddingGenerator(openai_key)
+        self.embedding_gen = EmbeddingGenerator(openai_key, base_url=openai_base_url)
         self.storage = SupabaseRAGStorage(supabase_url, supabase_key)
         self.logger = logging.getLogger(__name__ + '.PDFProcessor')
     
