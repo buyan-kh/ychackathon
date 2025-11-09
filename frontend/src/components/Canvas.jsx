@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Tldraw } from 'tldraw';
 import { useSyncDemo } from '@tldraw/sync';
 import { PdfUploadButton } from './PdfUploadButton';
+import { PdfViewer } from './PdfViewer';
 import 'tldraw/tldraw.css';
 
 export default function Canvas() {
@@ -15,7 +16,10 @@ export default function Canvas() {
   const handleUploadSuccess = (documentData) => {
     console.log('PDF uploaded successfully:', documentData);
     setUploadedDocuments(prev => [...prev, documentData]);
-    // TODO: Create PDF shape on canvas in Phase 3
+  };
+
+  const handleClosePdf = (documentId) => {
+    setUploadedDocuments(prev => prev.filter(doc => doc.document_id !== documentId));
   };
 
   return (
@@ -40,7 +44,7 @@ export default function Canvas() {
             fontSize: '12px',
             fontWeight: '500',
             color: '#64748B'
-          }}>
+          }} data-testid="pdf-counter">
             {uploadedDocuments.length} PDF{uploadedDocuments.length !== 1 ? 's' : ''} uploaded
           </div>
         )}
@@ -48,6 +52,17 @@ export default function Canvas() {
       
       {/* tldraw canvas */}
       <Tldraw store={store} />
+
+      {/* Render uploaded PDFs */}
+      {uploadedDocuments.map((doc, index) => (
+        <PdfViewer
+          key={doc.document_id}
+          documentUrl={doc.public_url}
+          documentId={doc.document_id}
+          position={{ x: 100 + (index * 50), y: 100 + (index * 50) }}
+          onClose={() => handleClosePdf(doc.document_id)}
+        />
+      ))}
     </div>
   );
 }
