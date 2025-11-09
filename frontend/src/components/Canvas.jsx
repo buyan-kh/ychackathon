@@ -92,13 +92,28 @@ export default function Canvas() {
           h: frameHeight,
           name: 'Handwriting Frame',
         },
+        isLocked: false, // Keep unlocked for moving but we'll handle resize separately
       });
 
       // Reparent handwriting strokes into the frame
       editor.reparentShapes(handwritingIds, frameId);
 
       // Group the frame and all strokes
-      editor.groupShapes([frameId, ...handwritingIds]);
+      const groupId = editor.groupShapes([frameId, ...handwritingIds]);
+
+      // Update the group to prevent resizing by setting meta flag
+      if (groupId) {
+        const groupShape = editor.getShape(groupId);
+        if (groupShape) {
+          editor.updateShape({
+            ...groupShape,
+            meta: {
+              ...groupShape.meta,
+              noResize: true,
+            },
+          });
+        }
+      }
 
       // Select the frame (which now contains all the grouped strokes)
       editor.select(frameId);
