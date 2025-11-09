@@ -13,26 +13,10 @@
   },
   {
     "content": "Install backend dependencies: pdfplumber, supabase-py, openai",
+    "status": "completed"
+  },
+  {
+    "content": "Create comprehensive POC script that combines all functionality: PDF upload, text extraction, chunking, embeddings, and storage",
     "status": "in_progress"
-  },
-  {
-    "content": "Create POC script: PDF upload to Supabase Storage",
-    "status": "pending"
-  },
-  {
-    "content": "Create POC script: PDF text extraction with pdfplumber",
-    "status": "pending"
-  },
-  {
-    "content": "Create POC script: Text chunking with page metadata",
-    "status": "pending"
-  },
-  {
-    "content": "Create POC script: Generate embeddings via OpenAI + store in Supabase",
-    "status": "pending"
-  },
-  {
-    "content": "Validate POC: Test similarity search query on stored vectors",
-    "status": "pending"
   }
 ]
