@@ -120,6 +120,25 @@ export default function Canvas() {
       }
       return next;
     });
+
+    // Remove provenance arrows when their target response shape is deleted
+    editor.sideEffects.registerAfterDeleteHandler('shape', (shape) => {
+      if (shape.type !== 'c1-response') {
+        return;
+      }
+
+      const arrowsToRemove = editor
+        .getCurrentPageShapes()
+        .filter(
+          (candidate) =>
+            candidate.type === 'arrow' &&
+            candidate.meta?.provenance?.targetId === shape.id
+        );
+
+      if (arrowsToRemove.length) {
+        editor.deleteShapes(arrowsToRemove.map((arrow) => arrow.id));
+      }
+    });
   };
 
   const handleUploadSuccess = (documentData) => {

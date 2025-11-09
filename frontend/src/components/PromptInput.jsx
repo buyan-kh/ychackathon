@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createShapeId, useEditor } from 'tldraw';
 
 const backendUrl = process.env.REACT_APP_BACKEND_URL;
@@ -14,6 +14,86 @@ export default function PromptInput({ focusEventName }) {
   const showMacKeybinds = isMac();
   const inputRef = useRef(null);
   const isCanvasEmpty = editor.getCurrentPageShapes().length === 0;
+
+  const clamp01 = (value) => Math.max(0, Math.min(1, value));
+
+  const getBoundsCenter = useCallback((bounds) => {
+    if (!bounds) return null;
+    return {
+      x: bounds.x + bounds.w / 2,
+      y: bounds.y + bounds.h / 2,
+    };
+  }, []);
+
+  const createArrowBinding = useCallback(
+    (arrowId, shapeId, terminal, anchorPoint, bounds) => {
+      if (!bounds || !anchorPoint) return;
+      const nx =
+        bounds.w === 0 ? 0.5 : clamp01((anchorPoint.x - bounds.x) / (bounds.w === 0 ? 1 : bounds.w));
+      const ny =
+        bounds.h === 0 ? 0.5 : clamp01((anchorPoint.y - bounds.y) / (bounds.h === 0 ? 1 : bounds.h));
+
+      editor.createBinding({
+        type: 'arrow',
+        fromId: arrowId,
+        toId: shapeId,
+        props: {
+          terminal,
+          normalizedAnchor: { x: nx, y: ny },
+          isExact: false,
+          isPrecise: true,
+          snap: 'none',
+        },
+      });
+    },
+    [editor]
+  );
+
+  const connectSourcesToResponse = useCallback(
+    (sourceIds, targetId) => {
+      if (!sourceIds?.length) return;
+      const targetBounds = editor.getShapePageBounds(targetId);
+      const targetCenter = getBoundsCenter(targetBounds);
+      if (!targetBounds || !targetCenter) return;
+
+      sourceIds.forEach((sourceId) => {
+        if (sourceId === targetId) return;
+        const sourceBounds = editor.getShapePageBounds(sourceId);
+        const sourceCenter = getBoundsCenter(sourceBounds);
+        if (!sourceBounds || !sourceCenter) return;
+
+        const deltaX = targetCenter.x - sourceCenter.x;
+        const deltaY = targetCenter.y - sourceCenter.y;
+
+        // Avoid zero-length arrows
+        if (Math.abs(deltaX) < 0.1 && Math.abs(deltaY) < 0.1) return;
+
+        const arrowId = createShapeId();
+        editor.createShape({
+          id: arrowId,
+          type: 'arrow',
+          x: sourceCenter.x,
+          y: sourceCenter.y,
+          props: {
+            start: { x: 0, y: 0 },
+            end: { x: deltaX, y: deltaY },
+            arrowheadStart: 'none',
+            arrowheadEnd: 'arrow',
+          },
+          meta: {
+            provenance: {
+              sourceId,
+              targetId,
+            },
+          },
+        });
+
+        createArrowBinding(arrowId, sourceId, 'start', sourceCenter, sourceBounds);
+        createArrowBinding(arrowId, targetId, 'end', targetCenter, targetBounds);
+      });
+    },
+    [createArrowBinding, editor, getBoundsCenter]
+  );
 
   useEffect(() => {
     const handleFocusEvent = () => {
@@ -32,6 +112,7 @@ export default function PromptInput({ focusEventName }) {
   const createAITextShape = async (promptText) => {
     if (!promptText.trim()) return;
 
+    const selectedShapeIds = editor.getSelectedShapeIds();
     const c1ShapeId = createShapeId();
     
     // Get viewport center
@@ -40,18 +121,24 @@ export default function PromptInput({ focusEventName }) {
     const y = viewport.y + (viewport.h / 2) - 150;
     
     // Create C1 Response shape ON THE CANVAS
-    editor.createShape({
-      id: c1ShapeId,
-      type: 'c1-response',
-      x,
-      y,
-      props: {
-        w: 600,
-        h: 300,
-        prompt: promptText,
-        c1Response: '',
-        isStreaming: true,
-      },
+    editor.run(() => {
+      editor.createShape({
+        id: c1ShapeId,
+        type: 'c1-response',
+        x,
+        y,
+        props: {
+          w: 600,
+          h: 300,
+          prompt: promptText,
+          c1Response: '',
+          isStreaming: true,
+        },
+      });
+
+      if (selectedShapeIds.length) {
+        connectSourcesToResponse(selectedShapeIds, c1ShapeId);
+      }
     });
     
     // Zoom to the shape
