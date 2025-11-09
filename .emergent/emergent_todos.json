@@ -1,7 +1,7 @@
 [
   {
     "content": "Configure PDF.js worker for react-pdf",
-    "status": "pending"
+    "status": "in_progress"
   },
   {
     "content": "Create PdfViewer component with Document and Page from react-pdf",
