@@ -17,22 +17,22 @@
   },
   {
     "content": "Install frontend dependencies: react-pdf, pdfjs-dist, framer-motion",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Add Sonner Toaster to App.js root component",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Create PdfUploadButton component with Dialog and file input",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Integrate PdfUploadButton with Canvas toolbar",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Test end-to-end upload flow and fix any issues",
-    "status": "pending"
+    "status": "in_progress"
   }
 ]
