@@ -120,3 +120,71 @@ COMMENT ON TABLE pdf_documents IS 'Stores metadata for uploaded PDF documents';
 COMMENT ON TABLE pdf_chunks IS 'Stores text chunks and embeddings from PDF documents';
 COMMENT ON FUNCTION match_pdf_chunks IS 'Performs semantic similarity search on PDF chunks';
 COMMENT ON FUNCTION get_document_stats IS 'Returns statistics for a specific document';
+
+-- Handwriting notes tables
+CREATE TABLE IF NOT EXISTS handwriting_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    frame_id TEXT UNIQUE NOT NULL,
+    room_id TEXT,
+    storage_path TEXT NOT NULL,
+    stroke_ids TEXT[],
+    page_bounds JSONB,
+    group_id TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    ocr_text TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS handwriting_chunks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    note_id UUID NOT NULL REFERENCES handwriting_notes(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    chunk_text TEXT NOT NULL,
+    embedding VECTOR(1536),
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_handwriting_notes_frame_id ON handwriting_notes(frame_id);
+CREATE INDEX IF NOT EXISTS idx_handwriting_chunks_note_id ON handwriting_chunks(note_id);
+CREATE INDEX IF NOT EXISTS idx_handwriting_chunks_embedding
+    ON handwriting_chunks USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+
+CREATE OR REPLACE FUNCTION match_handwriting_chunks(
+    query_embedding VECTOR(1536),
+    match_threshold FLOAT DEFAULT 0.7,
+    match_count INT DEFAULT 10,
+    filter_note_id UUID DEFAULT NULL
+)
+RETURNS TABLE (
+    id UUID,
+    note_id UUID,
+    chunk_text TEXT,
+    similarity FLOAT,
+    metadata JSONB
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        hc.id,
+        hc.note_id,
+        hc.chunk_text,
+        1 - (hc.embedding <=> query_embedding) AS similarity,
+        hc.metadata
+    FROM handwriting_chunks hc
+    WHERE 
+        (filter_note_id IS NULL OR hc.note_id = filter_note_id)
+        AND 1 - (hc.embedding <=> query_embedding) > match_threshold
+    ORDER BY hc.embedding <=> query_embedding
+    LIMIT match_count;
+END;
+$$;
+
+COMMENT ON TABLE handwriting_notes IS 'Stores metadata and OCR text for handwriting frames';
+COMMENT ON TABLE handwriting_chunks IS 'Stores OCR chunks + embeddings for handwriting frames';
+COMMENT ON FUNCTION match_handwriting_chunks IS 'Performs semantic similarity search on handwriting chunks';

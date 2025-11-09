@@ -27,19 +27,37 @@ def setup_supabase_storage():
         buckets = supabase.storage.list_buckets()
         bucket_names = [bucket['name'] for bucket in buckets]
         
-        if 'pdfs' in bucket_names:
-            print("✓ Bucket 'pdfs' already exists")
-        else:
-            # Create the pdfs bucket
+        desired_buckets = [
+            {
+                "name": "pdfs",
+                "options": {
+                    "public": False,
+                    "file_size_limit": 52428800,
+                    "allowed_mime_types": ["application/pdf"]
+                },
+                "success_msg": "PDF bucket ready"
+            },
+            {
+                "name": "handwriting",
+                "options": {
+                    "public": False,
+                    "file_size_limit": 10485760,  # 10MB PNG limit
+                    "allowed_mime_types": ["image/png", "image/jpeg"]
+                },
+                "success_msg": "Handwriting bucket ready"
+            }
+        ]
+
+        for bucket in desired_buckets:
+            if bucket["name"] in bucket_names:
+                print(f"✓ Bucket '{bucket['name']}' already exists")
+                continue
+
             supabase.storage.create_bucket(
-                'pdfs',
-                options={
-                    'public': False,  # Private bucket, use signed URLs
-                    'file_size_limit': 52428800,  # 50MB limit
-                    'allowed_mime_types': ['application/pdf']
-                }
+                bucket["name"],
+                options=bucket["options"]
             )
-            print("✓ Successfully created 'pdfs' bucket")
+            print(f"✓ Successfully created '{bucket['name']}' bucket ({bucket['success_msg']})")
         
         # Verify bucket access
         try:

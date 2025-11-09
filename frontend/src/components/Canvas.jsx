@@ -8,6 +8,7 @@ import { PdfShapeUtil } from '../shapeUtils/PdfShapeUtil';
 import 'tldraw/tldraw.css';
 
 const FOCUS_EVENT_NAME = 'focus-prompt-input';
+const DEFAULT_ROOM_ID = 'default';
 
 function CustomUI() {
   return (
@@ -36,7 +37,7 @@ export default function Canvas() {
 
   // Use tldraw's built-in demo sync with custom shapes
   const store = useSyncDemo({
-    roomId: 'default',
+    roomId: DEFAULT_ROOM_ID,
     shapeUtils: customShapeUtils,
   });
 
@@ -120,7 +121,6 @@ export default function Canvas() {
 
     // Filter to handwriting shapes (draw strokes that aren't closed)
     const handwritingIds = [];
-    const handwritingShapes = [];
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (!shape) continue;
@@ -128,7 +128,6 @@ export default function Canvas() {
       // Check if it's a draw shape that's not closed
       if (shape.type === 'draw' && !shape.props.isClosed) {
         handwritingIds.push(id);
-        handwritingShapes.push(shape);
       }
     }
 
@@ -163,6 +162,12 @@ export default function Canvas() {
 
     const frameWidth = maxX - minX;
     const frameHeight = maxY - minY;
+    const boundsPayload = {
+      x: minX,
+      y: minY,
+      w: frameWidth,
+      h: frameHeight,
+    };
 
     let frameId = null;
     let captureIds = [];
@@ -217,11 +222,13 @@ export default function Canvas() {
       frameId,
       groupId,
       captureIds,
+      handwritingIds,
+      bounds: boundsPayload,
     };
   };
 
   // Helper function to capture and upload frame image
-  const captureAndUploadFrame = async (editor, capturePayload) => {
+  const captureAndUploadFrame = async (editor, capturePayload, roomId = DEFAULT_ROOM_ID) => {
     if (!editor || !capturePayload) return;
 
     const { frameId, captureIds } = capturePayload;
@@ -264,8 +271,22 @@ export default function Canvas() {
         formData.append('file', blob, `${frameId || 'handwriting-note'}.png`);
       }
 
-      formData.append('frameId', frameId);
+      if (frameId) {
+        formData.append('frameId', frameId);
+      }
       formData.append('timestamp', new Date().toISOString());
+      if (capturePayload?.bounds) {
+        formData.append('bounds', JSON.stringify(capturePayload.bounds));
+      }
+      if (capturePayload?.handwritingIds?.length) {
+        formData.append('handwritingShapeIds', JSON.stringify(capturePayload.handwritingIds));
+      }
+      if (capturePayload?.groupId) {
+        formData.append('groupId', capturePayload.groupId);
+      }
+      if (roomId) {
+        formData.append('roomId', roomId);
+      }
 
       const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
       if (!backendUrl) {
@@ -322,7 +343,7 @@ export default function Canvas() {
 
             // If frame was created, capture and upload image
             if (frameData) {
-              await captureAndUploadFrame(editor, frameData);
+              await captureAndUploadFrame(editor, frameData, DEFAULT_ROOM_ID);
             }
           },
         },

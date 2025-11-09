@@ -5,13 +5,19 @@ Handles PDF text extraction, chunking, embedding generation, and Supabase storag
 
 import os
 import uuid
-from typing import List, Dict, Optional
+from io import BytesIO
+from typing import List, Dict, Optional, Tuple
 from datetime import datetime, timezone
+import tempfile
 import pdfplumber
 from openai import OpenAI
 from supabase import create_client, Client
 # from emergentintegrations.llm.utils import get_integration_proxy_url
 import logging
+from PIL import Image, ImageEnhance, ImageFilter
+import pytesseract
+from pytesseract import Output
+from postgrest import APIError
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +143,7 @@ class SupabaseRAGStorage:
     def __init__(self, supabase_url: str, supabase_key: str):
         self.client: Client = create_client(supabase_url, supabase_key)
         self.bucket_name = "pdfs"
+        self.handwriting_bucket = os.getenv("HANDWRITING_BUCKET", "handwriting")
         self.logger = logging.getLogger(__name__ + '.SupabaseRAGStorage')
     
     def upload_pdf_file(self, file_path: str, filename: str) -> str:
@@ -161,13 +168,164 @@ class SupabaseRAGStorage:
             self.logger.error(f"Error uploading PDF: {e}")
             raise
     
-    def get_public_url(self, storage_path: str) -> str:
-        """Get public URL for a file in storage"""
+    def upload_handwriting_image(
+        self,
+        image_bytes: bytes,
+        filename: str,
+        content_type: str = "image/png",
+    ) -> str:
+        """
+        Upload handwriting snapshot to Supabase Storage.
+        Returns: Storage path of uploaded file
+        """
+        storage_path = f"{uuid.uuid4()}/{filename}"
+
+        tmp_file = tempfile.NamedTemporaryFile(delete=False)
         try:
-            result = self.client.storage.from_(self.bucket_name).get_public_url(storage_path)
+            tmp_file.write(image_bytes)
+            tmp_file.flush()
+            tmp_file.close()
+
+            with open(tmp_file.name, 'rb') as f:
+                self.client.storage.from_(self.handwriting_bucket).upload(
+                    path=storage_path,
+                    file=f,
+                    file_options={"content-type": content_type}
+                )
+            self.logger.info(f"Uploaded handwriting image to: {storage_path}")
+            return storage_path
+        except Exception as e:
+            self.logger.error(f"Error uploading handwriting image: {e}")
+            raise
+        finally:
+            try:
+                os.unlink(tmp_file.name)
+            except OSError:
+                pass
+
+    def get_public_url(self, storage_path: str, bucket: Optional[str] = None) -> str:
+        """Get public URL for a file in storage"""
+        target_bucket = bucket or self.bucket_name
+        try:
+            result = self.client.storage.from_(target_bucket).get_public_url(storage_path)
             return result
         except Exception as e:
             self.logger.error(f"Error getting public URL: {e}")
+            raise
+
+    def insert_handwriting_note(
+        self,
+        frame_id: str,
+        storage_path: str,
+        room_id: Optional[str],
+        stroke_ids: Optional[List[str]],
+        page_bounds: Optional[Dict],
+        group_id: Optional[str],
+        metadata: Optional[Dict] = None,
+        status: str = "pending"
+    ) -> str:
+        """
+        Insert handwriting note metadata.
+        """
+        base_metadata = metadata.copy() if metadata else {}
+        if stroke_ids is not None:
+            base_metadata["stroke_ids"] = stroke_ids
+        if page_bounds is not None:
+            base_metadata["page_bounds"] = page_bounds
+        if group_id is not None:
+            base_metadata["group_id"] = group_id
+
+        payload = {
+            "frame_id": frame_id,
+            "storage_path": storage_path,
+            "room_id": room_id,
+            "status": status,
+            "metadata": base_metadata,
+        }
+
+        if stroke_ids is not None:
+            payload["stroke_ids"] = stroke_ids
+        if page_bounds is not None:
+            payload["page_bounds"] = page_bounds
+        if group_id is not None:
+            payload["group_id"] = group_id
+
+        try:
+            response = self.client.table("handwriting_notes").insert(payload).execute()
+            note_id = response.data[0]["id"]
+            self.logger.info(f"Inserted handwriting note {note_id} for frame {frame_id}")
+            return note_id
+        except APIError as e:
+            # Supabase schema might not yet have optional columns; fall back to metadata-only insert.
+            error_message = getattr(e, "message", str(e))
+            if e.code == "PGRST204" or "schema cache" in error_message.lower():
+                self.logger.warning(
+                    "Handwriting notes table missing optional columns, falling back to metadata-only insert: %s",
+                    e,
+                )
+                safe_payload = {
+                    "frame_id": frame_id,
+                    "storage_path": storage_path,
+                    "room_id": room_id,
+                    "status": status,
+                    "metadata": base_metadata,
+                }
+                response = self.client.table("handwriting_notes").insert(safe_payload).execute()
+                note_id = response.data[0]["id"]
+                self.logger.info(
+                    "Inserted handwriting note %s without optional columns (frame %s)",
+                    note_id,
+                    frame_id,
+                )
+                return note_id
+            self.logger.error(f"Error inserting handwriting note: {e}", exc_info=True)
+            raise
+        except Exception as e:
+            self.logger.error(f"Error inserting handwriting note: {e}", exc_info=True)
+            raise
+
+    def update_handwriting_note(self, note_id: str, updates: Dict) -> None:
+        """Update handwriting note record."""
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+        try:
+            self.client.table("handwriting_notes").update(updates).eq("id", note_id).execute()
+            self.logger.debug(f"Updated handwriting note {note_id} with {list(updates.keys())}")
+        except Exception as e:
+            self.logger.error(f"Error updating handwriting note {note_id}: {e}", exc_info=True)
+            raise
+
+    def insert_handwriting_chunks(self, note_id: str, chunks: List[Dict], embeddings: List[List[float]]) -> int:
+        """
+        Insert OCR chunks with embeddings into handwriting_chunks table.
+        """
+        if not chunks or not embeddings:
+            return 0
+
+        rows = []
+        for chunk, embedding in zip(chunks, embeddings):
+            rows.append({
+                "note_id": note_id,
+                "chunk_index": chunk["chunk_index"],
+                "chunk_text": chunk["text"],
+                "embedding": embedding,
+                "metadata": {
+                    "char_start": chunk["char_start"],
+                    "char_end": chunk["char_end"],
+                    **chunk.get("metadata", {})
+                }
+            })
+
+        try:
+            batch_size = 50
+            total_inserted = 0
+            for i in range(0, len(rows), batch_size):
+                batch = rows[i:i + batch_size]
+                self.client.table("handwriting_chunks").insert(batch).execute()
+                total_inserted += len(batch)
+            self.logger.info(f"Inserted {total_inserted} handwriting chunks for note {note_id}")
+            return total_inserted
+        except Exception as e:
+            self.logger.error(f"Error inserting handwriting chunks: {e}", exc_info=True)
             raise
     
     def insert_document(self, filename: str, storage_path: str, page_count: int, file_size: int) -> str:
@@ -346,3 +504,112 @@ class PDFProcessor:
         except Exception as e:
             self.logger.error(f"PDF processing failed: {e}", exc_info=True)
             raise
+
+
+class HandwritingProcessor:
+    """Process handwriting snapshots: OCR + embeddings + Supabase persistence"""
+
+    def __init__(self, storage: SupabaseRAGStorage, embedding_gen: EmbeddingGenerator, chunk_size: int = 400, overlap: int = 80):
+        self.storage = storage
+        self.embedding_gen = embedding_gen
+        self.chunk_size = chunk_size
+        self.overlap = overlap
+        self.logger = logging.getLogger(__name__ + '.HandwritingProcessor')
+
+    def process_note(self, note_id: str, image_bytes: bytes) -> None:
+        """Run OCR + embedding generation for a handwriting note"""
+        try:
+            self.logger.info(f"Processing handwriting note {note_id}")
+            ocr_text, ocr_metadata = self._perform_ocr(image_bytes)
+
+            if not ocr_text.strip():
+                self.storage.update_handwriting_note(note_id, {
+                    "status": "no_text",
+                    "ocr_text": "",
+                    "metadata": {**ocr_metadata, "message": "No text found by OCR"}
+                })
+                self.logger.warning(f"No OCR text extracted for note {note_id}")
+                return
+
+            chunks = self._chunk_text(ocr_text)
+            chunk_texts = [chunk["text"] for chunk in chunks]
+            embeddings = self.embedding_gen.generate_embeddings(chunk_texts)
+            inserted = self.storage.insert_handwriting_chunks(note_id, chunks, embeddings)
+
+            self.storage.update_handwriting_note(note_id, {
+                "status": "processed",
+                "ocr_text": ocr_text,
+                "metadata": {**ocr_metadata, "chunk_count": inserted}
+            })
+
+            self.logger.info(f"Handwriting note {note_id} processed successfully")
+
+        except Exception as e:
+            self.logger.error(f"Failed to process handwriting note {note_id}: {e}", exc_info=True)
+            try:
+                self.storage.update_handwriting_note(note_id, {
+                    "status": "failed",
+                    "metadata": {"error": str(e)}
+                })
+            except Exception:
+                pass
+
+    def _perform_ocr(self, image_bytes: bytes) -> Tuple[str, Dict]:
+        """Extract text via pytesseract with light preprocessing"""
+        image = Image.open(BytesIO(image_bytes))
+        grayscale = image.convert("L")
+        enhanced = ImageEnhance.Contrast(grayscale).enhance(2.0)
+        filtered = enhanced.filter(ImageFilter.MedianFilter(size=3))
+
+        try:
+            text = pytesseract.image_to_string(filtered)
+        except pytesseract.TesseractNotFoundError as e:
+            raise RuntimeError("Tesseract OCR binary is not installed") from e
+        text = text.replace("\x0c", "").strip()
+
+        ocr_data = {}
+        try:
+            data = pytesseract.image_to_data(filtered, output_type=Output.DICT)
+            confidences = [float(conf) for conf in data.get("conf", []) if conf not in ("-1", "")]
+            if confidences:
+                avg_conf = sum(confidences) / len(confidences)
+                ocr_data["avg_confidence"] = avg_conf
+                ocr_data["word_count"] = len(confidences)
+        except Exception as e:
+            self.logger.warning(f"Failed to capture OCR metadata: {e}")
+
+        return text, ocr_data
+
+    def _chunk_text(self, text: str) -> List[Dict]:
+        """Chunk OCR text to improve embedding recall"""
+        normalized = " ".join(text.split())
+        if not normalized:
+            return []
+
+        chunks = []
+        start = 0
+        index = 0
+        while start < len(normalized):
+            end = min(len(normalized), start + self.chunk_size)
+            chunk_text = normalized[start:end]
+            if chunk_text.strip():
+                chunks.append({
+                    "chunk_index": index,
+                    "text": chunk_text,
+                    "char_start": start,
+                    "char_end": end,
+                })
+                index += 1
+            if end == len(normalized):
+                break
+            next_start = max(0, end - self.overlap)
+            if next_start <= start:
+                next_start = end
+            start = next_start
+
+        return chunks if chunks else [{
+            "chunk_index": 0,
+            "text": normalized,
+            "char_start": 0,
+            "char_end": len(normalized),
+        }]

@@ -1,10 +1,18 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile, Form
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    WebSocket,
+    WebSocketDisconnect,
+    HTTPException,
+    File,
+    UploadFile,
+    Form,
+)
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 # from emergentintegrations.llm.chat import LlmChat, UserMessage
 import os
-from pathlib import Path
 # from motor.motor_asyncio import AsyncIOMotorClient
 import json
 from datetime import datetime, timezone
@@ -13,10 +21,14 @@ from typing import Dict, List, Set, Optional
 import tempfile
 import logging
 import asyncio
-import aiofiles
 from dotenv import load_dotenv
 
-from pdf_processor import PDFProcessor, EmbeddingGenerator, SupabaseRAGStorage
+from pdf_processor import (
+    PDFProcessor,
+    EmbeddingGenerator,
+    SupabaseRAGStorage,
+    HandwritingProcessor,
+)
 
 # Load environment variables
 load_dotenv()
@@ -65,11 +77,7 @@ OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 pdf_processor = PDFProcessor(SUPABASE_URL, SUPABASE_SERVICE_KEY, OPENAI_KEY, openai_base_url=None)
 embedding_gen = EmbeddingGenerator(OPENAI_KEY, base_url=None)
 storage = SupabaseRAGStorage(SUPABASE_URL, SUPABASE_SERVICE_KEY)
-
-BASE_DIR = Path(__file__).resolve().parent
-HANDWRITING_UPLOAD_DIR = Path(
-    os.getenv("HANDWRITING_UPLOAD_DIR", BASE_DIR / "uploads" / "handwriting")
-)
+handwriting_processor = HandwritingProcessor(storage, embedding_gen)
 
 # Pydantic models for PDF endpoints
 class SearchRequest(BaseModel):
@@ -202,11 +210,16 @@ async def search_pdfs(request: SearchRequest):
 
 @app.post("/api/handwriting-upload")
 async def upload_handwriting_image(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     frameId: Optional[str] = Form(None),
-    timestamp: Optional[str] = Form(None)
+    timestamp: Optional[str] = Form(None),
+    bounds: Optional[str] = Form(None),
+    handwritingShapeIds: Optional[str] = Form(None),
+    groupId: Optional[str] = Form(None),
+    roomId: Optional[str] = Form("default"),
 ):
-    """Upload handwriting frame image"""
+    """Upload handwriting frame image, store in Supabase, and trigger OCR pipeline."""
     try:
         logger.info(
             "Handwriting upload request received frameId=%s filename=%s content_type=%s",
@@ -214,41 +227,74 @@ async def upload_handwriting_image(
             file.filename,
             file.content_type,
         )
-        # Create uploads directory if it doesn't exist
-        HANDWRITING_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        
-        # Generate filename using frameId or timestamp
-        filename = f"{frameId or datetime.now(timezone.utc).timestamp()}.png"
-        file_path = HANDWRITING_UPLOAD_DIR / filename
-        
-        # Save file asynchronously
-        async with aiofiles.open(str(file_path), 'wb') as f:
-            content = await file.read()
-            content_length = len(content)
-            logger.info(
-                "Saving handwriting image to %s (bytes=%s)",
-                str(file_path),
-                content_length,
-            )
-            if content_length == 0:
+
+        if file.content_type not in ("image/png", "image/jpeg", "image/jpg"):
+            raise HTTPException(status_code=400, detail="Only PNG or JPG images are allowed")
+
+        image_bytes = await file.read()
+        if not image_bytes:
+            raise HTTPException(status_code=400, detail="Uploaded image is empty")
+
+        normalized_frame_id = frameId or str(uuid.uuid4())
+        filename = f"{normalized_frame_id}.png"
+
+        storage_path = storage.upload_handwriting_image(
+            image_bytes=image_bytes,
+            filename=filename,
+            content_type=file.content_type or "image/png",
+        )
+
+        bounds_payload = None
+        if bounds:
+            try:
+                bounds_payload = json.loads(bounds)
+            except json.JSONDecodeError:
+                logger.warning("Invalid bounds payload for frame %s: %s", normalized_frame_id, bounds)
+
+        stroke_ids = None
+        if handwritingShapeIds:
+            try:
+                stroke_ids = json.loads(handwritingShapeIds)
+            except json.JSONDecodeError:
                 logger.warning(
-                    "Handwriting image upload has zero bytes (frameId=%s filename=%s)",
-                    frameId,
-                    file.filename,
+                    "Invalid handwritingShapeIds payload for frame %s: %s",
+                    normalized_frame_id,
+                    handwritingShapeIds,
                 )
-            await f.write(content)
-        
-        logger.info(f"Uploaded handwriting image: {filename}")
-        
+
+        metadata = {"timestamp": timestamp} if timestamp else {}
+        try:
+            note_id = storage.insert_handwriting_note(
+                frame_id=normalized_frame_id,
+                storage_path=storage_path,
+                room_id=roomId,
+                stroke_ids=stroke_ids,
+                page_bounds=bounds_payload,
+                group_id=groupId,
+                metadata=metadata,
+                status="processing",
+            )
+        except Exception as e:
+            logger.error("Failed to insert handwriting note metadata: %s", e, exc_info=True)
+            raise HTTPException(status_code=500, detail="Failed to store handwriting metadata")
+
+        background_tasks.add_task(handwriting_processor.process_note, note_id, image_bytes)
+
+        public_url = storage.get_public_url(storage_path, bucket=storage.handwriting_bucket)
+
         return {
             "success": True,
-            "path": str(file_path),
-            "filename": filename,
-            "frameId": frameId,
-            "timestamp": timestamp
+            "note_id": note_id,
+            "frameId": normalized_frame_id,
+            "storage_path": storage_path,
+            "public_url": public_url,
+            "status": "processing",
         }
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error uploading image: {e}")
+        logger.error(f"Error uploading handwriting image: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
