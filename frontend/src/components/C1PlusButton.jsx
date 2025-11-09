@@ -344,10 +344,25 @@ export default function C1PlusButton() {
 
         const originShapeId = selectedC1Shape.id;
 
+        // Build conversation context from the selected shape
+        const previousPrompt = selectedC1Shape.props.prompt || '';
+        const previousResponse = selectedC1Shape.props.c1Response || '';
+        
+        // Create a focused context that includes the previous Q&A
+        let conversationContext = '';
+        if (previousPrompt && previousResponse) {
+          conversationContext = `Previous conversation:\nQ: ${previousPrompt}\nA: ${previousResponse}`;
+        }
+        
+        // Combine with additional canvas context
+        const combinedContext = conversationContext 
+          ? `${conversationContext}\n\n${additionalContext}`.trim()
+          : additionalContext;
+
         // Make API call to populate the shape with content
         await makeApiCall({
           searchQuery: prompt,
-          additionalContext,
+          additionalContext: combinedContext,
           onResponseStreamStart: () => {
             createArrowBetweenShapes(editor, originShapeId, shapeId);
             editor.updateShape({
