@@ -1,9 +1,4 @@
-import type { Editor, TLShapeId } from 'tldraw';
-
-export function getOptimalShapePosition(
-  editor: Editor,
-  options: { width: number; height: number; padding?: number }
-) {
+export function getOptimalShapePosition(editor, options) {
   const { width, height, padding = 50 } = options;
   
   // Get viewport bounds
@@ -16,11 +11,7 @@ export function getOptimalShapePosition(
   return { x, y };
 }
 
-export function centerCameraOnShape(
-  editor: Editor,
-  shapeId: TLShapeId,
-  options?: { duration?: number }
-) {
+export function centerCameraOnShape(editor, shapeId, options) {
   const { duration = 200 } = options || {};
   
   const shape = editor.getShape(shapeId);

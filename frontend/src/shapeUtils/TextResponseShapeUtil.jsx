@@ -1,20 +1,17 @@
-import { BaseBoxShapeUtil, HTMLContainer, type TLResizeInfo } from 'tldraw';
-import type { TextResponseShape } from '../shapes/TextResponseShape';
+import { BaseBoxShapeUtil, HTMLContainer } from 'tldraw';
+import React from 'react';
 
-export class TextResponseShapeUtil extends BaseBoxShapeUtil<TextResponseShape> {
-  static override type = 'text-response' as const;
+export class TextResponseShapeUtil extends BaseBoxShapeUtil {
+  static type = 'text-response';
 
-  getDefaultProps(): TextResponseShape['props'] {
+  getDefaultProps() {
     return {
       w: 600,
       h: 300,
     };
   }
 
-  override onResize = (
-    shape: TextResponseShape,
-    info: TLResizeInfo<TextResponseShape>
-  ) => {
+  onResize = (shape, info) => {
     const { scaleX, scaleY } = info;
     return {
       props: {
@@ -25,7 +22,7 @@ export class TextResponseShapeUtil extends BaseBoxShapeUtil<TextResponseShape> {
     };
   };
 
-  component = (shape: TextResponseShape) => {
+  component = (shape) => {
     const isDarkMode = this.editor.user.getIsDarkMode();
     const hasContent = shape.props.response && shape.props.response.length > 0;
 
@@ -57,7 +54,7 @@ export class TextResponseShapeUtil extends BaseBoxShapeUtil<TextResponseShape> {
                 borderRadius: '50%',
                 animation: 'spin 1s linear infinite',
               }}
-            ></div>
+            />
             <p style={{ fontSize: '14px', color: '#6B7280' }}>Generating response...</p>
           </div>
         </HTMLContainer>
@@ -110,16 +107,14 @@ export class TextResponseShapeUtil extends BaseBoxShapeUtil<TextResponseShape> {
           {shape.props.response}
           {shape.props.isStreaming && (
             <span
-              style={
-                {
-                  display: 'inline-block',
-                  width: '8px',
-                  height: '16px',
-                  marginLeft: '4px',
-                  backgroundColor: '#3B82F6',
-                  animation: 'pulse 1s infinite',
-                }
-              }
+              style={{
+                display: 'inline-block',
+                width: '8px',
+                height: '16px',
+                marginLeft: '4px',
+                backgroundColor: '#3B82F6',
+                animation: 'pulse 1s infinite',
+              }}
             >
               |
             </span>
@@ -129,20 +124,22 @@ export class TextResponseShapeUtil extends BaseBoxShapeUtil<TextResponseShape> {
     );
   };
 
-  indicator(shape: TextResponseShape) {
+  indicator(shape) {
     return <rect width={shape.props.w} height={shape.props.h} />;
   }
 }
 
 // Add keyframe animations
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-`;
-document.head.appendChild(style);
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.textContent = `
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+  `;
+  document.head.appendChild(style);
+}

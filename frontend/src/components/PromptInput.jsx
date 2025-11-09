@@ -1,22 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { track, useEditor } from 'tldraw';
-import { createTextResponseShape } from '../utils';
+import { createTextResponseShape } from '../utils/textShapeManager';
 
 const isMac = () => {
   return typeof window !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform);
 };
 
-interface PromptInputProps {
-  focusEventName: string;
-}
-
-export const PromptInput = track(({ focusEventName }: PromptInputProps) => {
+export const PromptInput = track(({ focusEventName }) => {
   const editor = useEditor();
   const isDarkMode = editor.user.getIsDarkMode();
   const [isFocused, setIsFocused] = useState(false);
   const [prompt, setPrompt] = useState('');
   const showMacKeybinds = isMac();
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef(null);
   const isCanvasZeroState = editor.getCurrentPageShapes().length === 0;
 
   useEffect(() => {
@@ -33,11 +29,11 @@ export const PromptInput = track(({ focusEventName }: PromptInputProps) => {
     };
   }, [focusEventName]);
 
-  const onInputSubmit = async (prompt: string) => {
+  const onInputSubmit = async (promptText) => {
     setPrompt('');
     try {
       await createTextResponseShape(editor, {
-        searchQuery: prompt,
+        searchQuery: promptText,
         width: 600,
         height: 300,
         centerCamera: true,
@@ -76,7 +72,7 @@ export const PromptInput = track(({ focusEventName }: PromptInputProps) => {
         e.preventDefault();
         onInputSubmit(prompt);
         setIsFocused(false);
-        inputRef.current?.blur();
+        if (inputRef.current) inputRef.current.blur();
       }}
     >
       <input

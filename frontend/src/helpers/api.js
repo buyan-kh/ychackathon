@@ -1,11 +1,3 @@
-export type ApiCallParams = {
-  searchQuery: string;
-  onResponseStreamStart?: () => void;
-  onResponseUpdate: (response: string) => void;
-  onResponseStreamEnd?: () => void;
-  additionalContext?: string;
-};
-
 const backendUrl = process.env.REACT_APP_BACKEND_URL;
 
 export const makeApiCall = async ({
@@ -14,9 +6,9 @@ export const makeApiCall = async ({
   onResponseStreamStart,
   onResponseStreamEnd,
   additionalContext,
-}: ApiCallParams) => {
+}) => {
   try {
-    onResponseStreamStart?.();
+    if (onResponseStreamStart) onResponseStreamStart();
 
     // Call FastAPI backend
     const response = await fetch(`${backendUrl}/api/ask`, {
@@ -77,6 +69,6 @@ export const makeApiCall = async ({
     console.error('Error in makeApiCall:', error);
     throw error;
   } finally {
-    onResponseStreamEnd?.();
+    if (onResponseStreamEnd) onResponseStreamEnd();
   }
 };

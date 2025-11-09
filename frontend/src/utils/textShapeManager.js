@@ -1,20 +1,8 @@
-import type { Editor, TLShapeId } from 'tldraw';
 import { createShapeId } from 'tldraw';
 import { getOptimalShapePosition, centerCameraOnShape } from './shapePositioning';
 import { makeApiCall } from '../helpers/api';
 
-export interface TextShapeCreationOptions {
-  searchQuery: string;
-  width?: number;
-  height?: number;
-  centerCamera?: boolean;
-  animationDuration?: number;
-}
-
-export async function createTextResponseShape(
-  editor: Editor,
-  options: TextShapeCreationOptions
-): Promise<TLShapeId> {
+export async function createTextResponseShape(editor, options) {
   const {
     searchQuery,
     width = 600,
