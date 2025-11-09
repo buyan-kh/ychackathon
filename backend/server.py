@@ -516,30 +516,65 @@ async def ask_stream(request: PromptRequest):
                 tool_call_executed = False
                 last_finish_reason = None
                 
-                async for chunk in stream:
-                    if chunk.choices and len(chunk.choices) > 0:
-                        delta = chunk.choices[0].delta
-                        finish_reason = chunk.choices[0].finish_reason
-                        if finish_reason:
-                            last_finish_reason = finish_reason
-                        
-                        # Handle regular content
-                        if delta.content:
-                            yield f"data: {json.dumps({'content': delta.content})}\n\n"
-                        
-                        # Handle tool calls
-                        if delta.tool_calls:
-                            for tool_call_delta in delta.tool_calls:
-                                if tool_call_delta.function:
-                                    if tool_call_delta.id:
-                                        # Check if this is a new tool call or continuation of existing one
-                                        if current_tool_call and tool_call_id == tool_call_delta.id:
-                                            # Same ID - accumulate data instead of resetting
+                # Wrap streaming in timeout to prevent hanging
+                try:
+                    async for chunk in stream:
+                        if chunk.choices and len(chunk.choices) > 0:
+                            delta = chunk.choices[0].delta
+                            finish_reason = chunk.choices[0].finish_reason
+                            if finish_reason:
+                                last_finish_reason = finish_reason
+                            
+                            # Handle regular content
+                            if delta.content:
+                                yield f"data: {json.dumps({'content': delta.content})}\n\n"
+                            
+                            # Handle tool calls
+                            if delta.tool_calls:
+                                for tool_call_delta in delta.tool_calls:
+                                    if tool_call_delta.function:
+                                        if tool_call_delta.id:
+                                            # Check if this is a new tool call or continuation of existing one
+                                            if current_tool_call and tool_call_id == tool_call_delta.id:
+                                                # Same ID - accumulate data instead of resetting
+                                                existing_name = current_tool_call.get("name", "").strip()
+                                                if tool_call_delta.function.name:
+                                                    if not existing_name:
+                                                        current_tool_call["name"] = tool_call_delta.function.name
+                                                        logger.debug(f"Tool call name set in continuation chunk: '{tool_call_delta.function.name}'")
+                                                    elif existing_name != tool_call_delta.function.name:
+                                                        logger.warning(f"Tool call name mismatch: existing='{existing_name}', new='{tool_call_delta.function.name}', keeping existing")
+                                                
+                                                # Accumulate arguments
+                                                args_chunk = tool_call_delta.function.arguments or ""
+                                                if args_chunk:
+                                                    current_tool_call["arguments"] += args_chunk
+                                                    logger.debug(f"Accumulated args chunk ({len(args_chunk)} chars): '{args_chunk[:50]}...'")
+                                            else:
+                                                # Different ID or no existing call - start new tool call
+                                                if current_tool_call and tool_call_id and tool_call_id != tool_call_delta.id:
+                                                    logger.warning(f"New tool call started (ID: {tool_call_delta.id}) while previous incomplete call exists (ID: {tool_call_id}). Resetting previous call.")
+                                                
+                                                tool_call_id = tool_call_delta.id
+                                                initial_name = tool_call_delta.function.name or ""
+                                                initial_args = tool_call_delta.function.arguments or ""
+                                                current_tool_call = {
+                                                    "name": initial_name,
+                                                    "arguments": initial_args
+                                                }
+                                                logger.info(
+                                                    f"Tool call started with ID {tool_call_id}: "
+                                                    f"name='{initial_name}' (present: {bool(tool_call_delta.function.name)}), "
+                                                    f"args_length={len(initial_args)}, "
+                                                    f"args_preview='{initial_args[:50]}...'"
+                                                )
+                                        elif current_tool_call and tool_call_id:
+                                            # No ID in this chunk - accumulate data for existing tool call
                                             existing_name = current_tool_call.get("name", "").strip()
                                             if tool_call_delta.function.name:
                                                 if not existing_name:
                                                     current_tool_call["name"] = tool_call_delta.function.name
-                                                    logger.debug(f"Tool call name set in continuation chunk: '{tool_call_delta.function.name}'")
+                                                    logger.debug(f"Tool call name set: '{tool_call_delta.function.name}'")
                                                 elif existing_name != tool_call_delta.function.name:
                                                     logger.warning(f"Tool call name mismatch: existing='{existing_name}', new='{tool_call_delta.function.name}', keeping existing")
                                             
@@ -548,155 +583,130 @@ async def ask_stream(request: PromptRequest):
                                             if args_chunk:
                                                 current_tool_call["arguments"] += args_chunk
                                                 logger.debug(f"Accumulated args chunk ({len(args_chunk)} chars): '{args_chunk[:50]}...'")
-                                        else:
-                                            # Different ID or no existing call - start new tool call
-                                            if current_tool_call and tool_call_id and tool_call_id != tool_call_delta.id:
-                                                logger.warning(f"New tool call started (ID: {tool_call_delta.id}) while previous incomplete call exists (ID: {tool_call_id}). Resetting previous call.")
-                                            
-                                            tool_call_id = tool_call_delta.id
-                                            initial_name = tool_call_delta.function.name or ""
-                                            initial_args = tool_call_delta.function.arguments or ""
-                                            current_tool_call = {
-                                                "name": initial_name,
-                                                "arguments": initial_args
-                                            }
-                                            logger.info(
-                                                f"Tool call started with ID {tool_call_id}: "
-                                                f"name='{initial_name}' (present: {bool(tool_call_delta.function.name)}), "
-                                                f"args_length={len(initial_args)}, "
-                                                f"args_preview='{initial_args[:50]}...'"
-                                            )
-                                    elif current_tool_call and tool_call_id:
-                                        # No ID in this chunk - accumulate data for existing tool call
-                                        existing_name = current_tool_call.get("name", "").strip()
-                                        if tool_call_delta.function.name:
-                                            if not existing_name:
-                                                current_tool_call["name"] = tool_call_delta.function.name
-                                                logger.debug(f"Tool call name set: '{tool_call_delta.function.name}'")
-                                            elif existing_name != tool_call_delta.function.name:
-                                                logger.warning(f"Tool call name mismatch: existing='{existing_name}', new='{tool_call_delta.function.name}', keeping existing")
-                                        
-                                        # Accumulate arguments
-                                        args_chunk = tool_call_delta.function.arguments or ""
-                                        if args_chunk:
-                                            current_tool_call["arguments"] += args_chunk
-                                            logger.debug(f"Accumulated args chunk ({len(args_chunk)} chars): '{args_chunk[:50]}...'")
-                        
-                        # Execute tool when finish_reason is tool_calls
-                        # Note: finish_reason may be set in the same chunk as the final tool_call delta,
-                        # so we process tool_calls first, then check finish_reason
-                        if finish_reason == "tool_calls" and current_tool_call:
-                            tool_name = current_tool_call.get('name', '').strip()
-                            raw_args = current_tool_call.get('arguments', '')
                             
-                            logger.debug(f"Tool call complete check - name: '{tool_name}', args length: {len(raw_args)}, tool_call_id: {tool_call_id}")
-                            
-                            # Validate tool name exists and is not empty
-                            if not tool_name:
-                                # Log detailed information to help diagnose the issue
-                                args_preview = raw_args[:100] if raw_args else "(empty)"
-                                logger.warning(
-                                    f"Tool call with empty/missing name, skipping. "
-                                    f"Tool call ID: {tool_call_id}, "
-                                    f"Arguments preview: '{args_preview}', "
-                                    f"Arguments length: {len(raw_args) if raw_args else 0}, "
-                                    f"Full raw data: {current_tool_call}"
-                                )
-                                current_tool_call = None
-                                tool_call_id = None
-                                continue
-                            
-                            # Validate arguments format - should be valid JSON
-                            if raw_args:
-                                raw_args_stripped = raw_args.strip()
+                            # Execute tool when finish_reason is tool_calls
+                            # Note: finish_reason may be set in the same chunk as the final tool_call delta,
+                            # so we process tool_calls first, then check finish_reason
+                            if finish_reason == "tool_calls" and current_tool_call:
+                                tool_name = current_tool_call.get('name', '').strip()
+                                raw_args = current_tool_call.get('arguments', '')
                                 
-                                # Check if arguments are too short to be valid JSON
-                                if len(raw_args_stripped) < 3:
-                                    logger.warning(f"Tool call '{tool_name}' arguments too short to be valid JSON: '{raw_args}', skipping")
+                                logger.debug(f"Tool call complete check - name: '{tool_name}', args length: {len(raw_args)}, tool_call_id: {tool_call_id}")
+                                
+                                # Validate tool name exists and is not empty
+                                if not tool_name:
+                                    # Log detailed information to help diagnose the issue
+                                    args_preview = raw_args[:100] if raw_args else "(empty)"
+                                    logger.warning(
+                                        f"Tool call with empty/missing name, skipping. "
+                                        f"Tool call ID: {tool_call_id}, "
+                                        f"Arguments preview: '{args_preview}', "
+                                        f"Arguments length: {len(raw_args) if raw_args else 0}, "
+                                        f"Full raw data: {current_tool_call}"
+                                    )
                                     current_tool_call = None
                                     tool_call_id = None
                                     continue
                                 
-                                # Check if arguments look like JSON (should start with '{' and end with '}')
-                                if not raw_args_stripped.startswith('{'):
-                                    logger.warning(f"Tool call '{tool_name}' arguments missing opening brace (incomplete JSON): '{raw_args[:100]}...', skipping. This may indicate missing data chunks.")
+                                # Validate arguments format - should be valid JSON
+                                if raw_args:
+                                    raw_args_stripped = raw_args.strip()
+                                
+                                    # Check if arguments are too short to be valid JSON
+                                    if len(raw_args_stripped) < 3:
+                                        logger.warning(f"Tool call '{tool_name}' arguments too short to be valid JSON: '{raw_args}', skipping")
+                                        current_tool_call = None
+                                        tool_call_id = None
+                                        continue
+                                    
+                                    # Check if arguments look like JSON (should start with '{' and end with '}')
+                                    if not raw_args_stripped.startswith('{'):
+                                        logger.warning(f"Tool call '{tool_name}' arguments missing opening brace (incomplete JSON): '{raw_args[:100]}...', skipping. This may indicate missing data chunks.")
+                                        current_tool_call = None
+                                        tool_call_id = None
+                                        continue
+                                    
+                                    if not raw_args_stripped.endswith('}'):
+                                        logger.warning(f"Tool call '{tool_name}' arguments missing closing brace (incomplete JSON): '{raw_args[:100]}...', skipping. This may indicate missing data chunks.")
+                                        current_tool_call = None
+                                        tool_call_id = None
+                                        continue
+                                
+                                # Parse tool arguments safely using C1-style error handling
+                                tool_args = parse_tool_arguments(current_tool_call)
+                                logger.debug(f"Parsed arguments for '{tool_name}': {tool_args}")
+                                
+                                # If parsing failed (returned empty dict) but we had arguments, they were likely incomplete or malformed
+                                if not tool_args and raw_args and raw_args.strip():
+                                    logger.warning(f"Tool call '{tool_name}' arguments failed to parse as JSON: '{raw_args[:100]}...', skipping")
                                     current_tool_call = None
                                     tool_call_id = None
                                     continue
                                 
-                                if not raw_args_stripped.endswith('}'):
-                                    logger.warning(f"Tool call '{tool_name}' arguments missing closing brace (incomplete JSON): '{raw_args[:100]}...', skipping. This may indicate missing data chunks.")
-                                    current_tool_call = None
-                                    tool_call_id = None
-                                    continue
-                            
-                            # Parse tool arguments safely using C1-style error handling
-                            tool_args = parse_tool_arguments(current_tool_call)
-                            logger.debug(f"Parsed arguments for '{tool_name}': {tool_args}")
-                            
-                            # If parsing failed (returned empty dict) but we had arguments, they were likely incomplete or malformed
-                            if not tool_args and raw_args and raw_args.strip():
-                                logger.warning(f"Tool call '{tool_name}' arguments failed to parse as JSON: '{raw_args[:100]}...', skipping")
-                                current_tool_call = None
-                                tool_call_id = None
-                                continue
-                            
-                            # Validate tool-specific requirements
-                            if tool_name == "getImageSrc":
-                                if not tool_args or not tool_args.get("altText"):
-                                    logger.warning(f"getImageSrc called without altText parameter. Args: {tool_args}, Raw: '{raw_args[:50]}'")
-                                    current_tool_call = None
-                                    tool_call_id = None
-                                    continue
-                            
-                            logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
-                            
-                            # Send thinking state message
-                            thinking_data = {
-                                'thinking': 'Searching for images...',
-                                'description': 'Finding the perfect image for your canvas.'
-                            }
-                            yield f"data: {json.dumps(thinking_data)}\n\n"
-                            
-                            try:
-                                # Execute the tool
+                                # Validate tool-specific requirements
                                 if tool_name == "getImageSrc":
-                                    alt_text = tool_args.get("altText", "")
-                                    logger.info(f"Searching for image: '{alt_text}'")
+                                    if not tool_args or not tool_args.get("altText"):
+                                        logger.warning(f"getImageSrc called without altText parameter. Args: {tool_args}, Raw: '{raw_args[:50]}'")
+                                        current_tool_call = None
+                                        tool_call_id = None
+                                        continue
+                                
+                                logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
+                                
+                                # Send thinking state message
+                                thinking_data = {
+                                    'thinking': 'Searching for images...',
+                                    'description': 'Finding the perfect image for your canvas.'
+                                }
+                                yield f"data: {json.dumps(thinking_data)}\n\n"
+                                
+                                try:
+                                    # Execute the tool
+                                    if tool_name == "getImageSrc":
+                                        alt_text = tool_args.get("altText", "")
+                                        logger.info(f"Searching for image: '{alt_text}'")
+                                        
+                                        image_url = await image_tool.search_image(alt_text)
+                                        
+                                        # Add tool result to messages
+                                        messages.append({
+                                            "role": "assistant",
+                                            "content": None,
+                                            "tool_calls": [{
+                                                "id": tool_call_id,
+                                                "type": "function",
+                                                "function": {
+                                                    "name": current_tool_call["name"],
+                                                    "arguments": current_tool_call["arguments"]
+                                                }
+                                            }]
+                                        })
+                                        messages.append({
+                                            "role": "tool",
+                                            "tool_call_id": tool_call_id,
+                                            "content": image_url or "No image found"
+                                        })
+                                        
+                                        # Mark that we executed a tool call
+                                        tool_call_executed = True
+                                        current_tool_call = None
+                                        tool_call_id = None
+                                        # Break out of the inner stream loop to restart with new messages
+                                        break
                                     
-                                    image_url = await image_tool.search_image(alt_text)
-                                    
-                                    # Add tool result to messages
-                                    messages.append({
-                                        "role": "assistant",
-                                        "content": None,
-                                        "tool_calls": [{
-                                            "id": tool_call_id,
-                                            "type": "function",
-                                            "function": {
-                                                "name": current_tool_call["name"],
-                                                "arguments": current_tool_call["arguments"]
-                                            }
-                                        }]
-                                    })
-                                    messages.append({
-                                        "role": "tool",
-                                        "tool_call_id": tool_call_id,
-                                        "content": image_url or "No image found"
-                                    })
-                                    
-                                    # Mark that we executed a tool call
-                                    tool_call_executed = True
+                                except Exception as tool_error:
+                                    logger.error(f"Tool execution error: {tool_error}", exc_info=True)
+                                    # Continue without the tool result
                                     current_tool_call = None
                                     tool_call_id = None
-                                    # Break out of the inner stream loop to restart with new messages
-                                    break
-                                
-                            except Exception as tool_error:
-                                logger.error(f"Tool execution error: {tool_error}", exc_info=True)
-                                # Continue without the tool result
-                                current_tool_call = None
-                                tool_call_id = None
+                except asyncio.TimeoutError:
+                    logger.error("Streaming request timed out after 120 seconds")
+                    yield f"data: {json.dumps({'error': 'Request timed out. Please try again.'})}\n\n"
+                    break
+                except Exception as stream_error:
+                    logger.error(f"C1 streaming error: {stream_error}", exc_info=True)
+                    yield f"data: {json.dumps({'error': str(stream_error)})}\n\n"
+                    break
                 
                 # After processing the stream, check if we need to continue with tool results
                 # If a tool was executed, the while loop will continue and create a new stream
@@ -779,30 +789,31 @@ async def create_embed(request: CreateEmbedRequest):
             }
         
         elif request.embed_type == "youtube":
-            if not embed_tool.youtube_enabled:
-                raise HTTPException(
-                    status_code=503,
-                    detail="YouTube API key not configured"
-                )
+            # Try to search for a specific video first
+            video_id = None
+            if embed_tool.youtube_enabled:
+                video_id = embed_tool.search_youtube_video(request.query)
             
-            # Search for video
-            video_id = await embed_tool.search_youtube_video(request.query)
-            
-            if not video_id:
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"No YouTube video found for: {request.query}"
-                )
-            
-            # Create YouTube embed
-            embed_url = embed_tool.create_youtube_embed(video_id)
-            
-            return {
-                "embedUrl": embed_url,
-                "service": "youtube",
-                "query": request.query,
-                "videoId": video_id
-            }
+            if video_id:
+                # Create YouTube embed with specific video
+                embed_url = embed_tool.create_youtube_embed(video_id)
+                return {
+                    "embedUrl": embed_url,
+                    "service": "youtube",
+                    "query": request.query,
+                    "videoId": video_id
+                }
+            else:
+                # Fallback: Create a YouTube search embed URL
+                # This shows search results without needing the Data API
+                embed_url = embed_tool.create_youtube_search_embed(request.query)
+                return {
+                    "embedUrl": embed_url,
+                    "service": "youtube",
+                    "query": request.query,
+                    "videoId": None,
+                    "isSearchEmbed": True
+                }
         
         else:
             raise HTTPException(

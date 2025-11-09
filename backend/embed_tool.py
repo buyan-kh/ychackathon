@@ -25,21 +25,23 @@ class EmbedTool:
         self.youtube_api_key = youtube_api_key or os.getenv("YOUTUBE_API_KEY")
         
         # Check if APIs are configured
-        self.maps_enabled = bool(self.google_maps_api_key)
+        self.google_maps_enabled = bool(self.google_maps_api_key)
         self.youtube_enabled = bool(self.youtube_api_key)
         
-        if not self.maps_enabled:
+        if not self.google_maps_enabled:
             logger.warning("Google Maps API key not configured. Maps embeds will be disabled.")
         if not self.youtube_enabled:
             logger.warning("YouTube API key not configured. YouTube embeds will be disabled.")
         
         # Initialize YouTube service if enabled
+        self.youtube_service = None
         if self.youtube_enabled:
             try:
                 self.youtube_service = build("youtube", "v3", developerKey=self.youtube_api_key)
             except Exception as e:
-                logger.error(f"Failed to initialize YouTube service: {e}")
+                logger.error(f"Failed to initialize YouTube service: {e}", exc_info=True)
                 self.youtube_enabled = False
+                self.youtube_service = None
     
     def create_google_maps_embed(self, query: str, lat: Optional[float] = None, lng: Optional[float] = None) -> Optional[str]:
         """
@@ -53,7 +55,7 @@ class EmbedTool:
         Returns:
             Google Maps embed URL or None if API key not configured
         """
-        if not self.maps_enabled:
+        if not self.google_maps_enabled:
             logger.warning("Google Maps API key not configured")
             return None
         
@@ -72,15 +74,20 @@ class EmbedTool:
     def search_youtube_video(self, query: str) -> Optional[str]:
         """
         Search for a YouTube video and return the first result's video ID.
+        Falls back to creating a search embed URL if API is unavailable.
         
         Args:
             query: Search query (e.g., "how to cook orange chicken")
         
         Returns:
-            Video ID of the first result, or None if no results or API error
+            Video ID of the first result, or None if API unavailable
         """
         if not self.youtube_enabled:
             logger.warning("YouTube API key not configured")
+            return None
+        
+        if not hasattr(self, 'youtube_service') or self.youtube_service is None:
+            logger.warning("YouTube service not initialized, will use search embed fallback")
             return None
         
         try:
@@ -105,10 +112,15 @@ class EmbedTool:
                 return None
                 
         except HttpError as e:
-            logger.error(f"YouTube API error searching for '{query}': {e}")
+            error_details = str(e)
+            if e.resp.status == 403:
+                logger.warning(f"YouTube Data API v3 search is blocked (403) for '{query}'. "
+                             f"Will use search embed URL fallback instead.")
+            else:
+                logger.warning(f"YouTube API error searching for '{query}': {e}. Using fallback.")
             return None
         except Exception as e:
-            logger.error(f"Unexpected error searching YouTube for '{query}': {e}", exc_info=True)
+            logger.warning(f"Unexpected error searching YouTube for '{query}': {e}. Using fallback.")
             return None
     
     def create_youtube_embed(self, video_id: str) -> str:
@@ -122,6 +134,32 @@ class EmbedTool:
             YouTube embed URL
         """
         return f"https://www.youtube.com/embed/{video_id}"
+    
+    def create_youtube_search_embed(self, query: str) -> str:
+        """
+        Create a YouTube embed URL for search queries.
+        
+        Note: YouTube doesn't officially support embedding search results.
+        This creates a URL that will attempt to show YouTube content related
+        to the search query. For best results, enable YouTube Data API v3
+        to get specific video IDs.
+        
+        Args:
+            query: Search query (e.g., "how to cook orange chicken")
+        
+        Returns:
+            YouTube embed URL (may show related content or require user interaction)
+        """
+        import urllib.parse
+        encoded_query = urllib.parse.quote_plus(query)
+        # Create a YouTube URL that can be used for search
+        # Since YouTube search pages can't be embedded, we'll use
+        # YouTube's watch page with search parameters as a fallback
+        # This won't embed perfectly but provides a functional alternative
+        embed_url = f"https://www.youtube.com/embed?q={encoded_query}"
+        logger.info(f"Created YouTube search embed fallback for query: {query}")
+        logger.warning("Note: YouTube search embeds have limited support. Consider enabling YouTube Data API v3 for better results.")
+        return embed_url
 
 
 # Global instance

@@ -2,10 +2,11 @@ import { BaseBoxShapeUtil, HTMLContainer } from 'tldraw';
 import React, { memo } from 'react';
 
 // Memoized embed component
-const EmbedComponent = memo(({ shape }) => {
+const EmbedComponent = memo(({ shape, editor }) => {
   const embedUrl = shape.props.embedUrl;
   const service = shape.props.service || 'unknown';
   const query = shape.props.query || '';
+  const isInteracting = shape.props.isInteracting || false;
 
   if (!embedUrl) {
     return (
@@ -100,12 +101,44 @@ const EmbedComponent = memo(({ shape }) => {
       </div>
 
       {/* Iframe container */}
-      <div style={{
-        flex: 1,
-        position: 'relative',
-        overflow: 'hidden',
-        background: '#FFFFFF'
-      }}>
+      <div 
+        style={{
+          flex: 1,
+          position: 'relative',
+          overflow: 'hidden',
+          background: '#FFFFFF',
+          pointerEvents: isInteracting ? 'auto' : 'none',
+          cursor: isInteracting ? 'default' : 'pointer'
+        }}
+      >
+        {!isInteracting && (
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            zIndex: 10,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0, 0, 0, 0.02)',
+            cursor: 'pointer',
+            userSelect: 'none'
+          }}>
+            <div style={{
+              padding: '8px 16px',
+              background: 'rgba(255, 255, 255, 0.9)',
+              borderRadius: '8px',
+              fontSize: '12px',
+              color: '#6B7280',
+              border: '1px solid #E5E7EB',
+              boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+            }}>
+              Double-click to interact
+            </div>
+          </div>
+        )}
         <iframe
           src={embedUrl}
           width="100%"
@@ -119,7 +152,8 @@ const EmbedComponent = memo(({ shape }) => {
             top: 0,
             left: 0,
             width: '100%',
-            height: '100%'
+            height: '100%',
+            pointerEvents: isInteracting ? 'auto' : 'none'
           }}
           title={`${service} embed`}
         />
@@ -140,6 +174,7 @@ export class EmbedShapeUtil extends BaseBoxShapeUtil {
       embedUrl: '',
       service: '',
       query: '',
+      isInteracting: false,
     };
   }
 
@@ -155,7 +190,25 @@ export class EmbedShapeUtil extends BaseBoxShapeUtil {
   };
 
   component = (shape) => {
-    return <EmbedComponent shape={shape} />;
+    return <EmbedComponent shape={shape} editor={this.editor} />;
+  };
+
+  // Prevent text editing on double-click
+  canEdit = () => {
+    return false;
+  };
+
+  // Handle double-click to toggle interaction mode
+  onDoubleClick = (shape) => {
+    // Toggle interaction state
+    this.editor.updateShape({
+      id: shape.id,
+      type: shape.type,
+      props: {
+        ...shape.props,
+        isInteracting: !shape.props.isInteracting,
+      },
+    });
   };
 
   indicator(shape) {
