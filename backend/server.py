@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, File, UploadFile, Form
 from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -12,6 +12,7 @@ from typing import Dict, List, Set, Optional
 import tempfile
 import logging
 import asyncio
+import aiofiles
 from dotenv import load_dotenv
 
 from pdf_processor import PDFProcessor, EmbeddingGenerator, SupabaseRAGStorage
@@ -235,6 +236,40 @@ async def search_pdfs(request: SearchRequest):
         
     except Exception as e:
         logger.error(f"Search failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/handwriting-upload")
+async def upload_handwriting_image(
+    file: UploadFile = File(...),
+    frameId: Optional[str] = Form(None),
+    timestamp: Optional[str] = Form(None)
+):
+    """Upload handwriting frame image"""
+    try:
+        # Create uploads directory if it doesn't exist
+        upload_dir = "/app/backend/uploads/handwriting"
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        # Generate filename using frameId or timestamp
+        filename = f"{frameId or datetime.now(timezone.utc).timestamp()}.png"
+        file_path = os.path.join(upload_dir, filename)
+        
+        # Save file asynchronously
+        async with aiofiles.open(file_path, 'wb') as f:
+            content = await file.read()
+            await f.write(content)
+        
+        logger.info(f"Uploaded handwriting image: {filename}")
+        
+        return {
+            "success": True,
+            "path": file_path,
+            "filename": filename,
+            "frameId": frameId,
+            "timestamp": timestamp
+        }
+    except Exception as e:
+        logger.error(f"Error uploading image: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

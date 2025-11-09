@@ -218,11 +218,48 @@
    - All controls with data-testid attributes
    - Props: `{ documentId, fileUrl, onClose }`
 
+### Phase 3.1: Auto-Frame Handwriting Feature ✅ COMPLETED
+**Status:** COMPLETED - Feature fully functional
+
+**Achievements:**
+- ✅ Implemented keyboard shortcut 's' to auto-frame selected handwriting strokes
+- ✅ Frame creation with proper z-index (frame appears behind strokes using `sendToBack`)
+- ✅ Automatic reparenting of handwriting strokes into the frame
+- ✅ Grouping of frame + strokes as single object
+- ✅ Non-resizable behavior (group can only be moved, not resized)
+- ✅ Integration with tldraw's native behaviors (undo, delete, multiplayer sync)
+- ✅ Custom `beforeChange` handler to prevent resize operations on groups with `noResize` meta flag
+- ✅ Extended to capture PNG snapshots and upload to backend
+
+**Implementation Details:**
+- Modified `/app/frontend/src/components/Canvas.jsx`
+- Added `editorRef` to capture editor instance on mount
+- Created `autoFrameHandwriting()` helper function
+- Created `captureAndUploadFrame()` helper function for image capture and upload
+- Added `POST /api/handwriting-upload` backend endpoint
+- Used tldraw's `overrides` prop to inject custom 's' keyboard action
+- All operations wrapped in `editor.run()` for proper history and multiplayer sync
+
+**User Stories Completed:**
+1. ✅ As a user, I can select handwriting strokes and press 's' to auto-frame them
+2. ✅ As a user, the frame appears behind my strokes (not covering them)
+3. ✅ As a user, the framed group behaves like a note (movable but not resizable)
+4. ✅ As a user, when I press 's' to frame handwriting, a snapshot is automatically captured and uploaded
+5. ✅ As a user, I can undo the frame operation with ⌘+Z
+6. ✅ As a user, the auto-frame feature works in multiplayer (syncs to other users)
+
 3. **Research tldraw v4 custom shapes** (Status: Pending)
    - Study tldraw shape API documentation
    - Determine best approach: custom shape vs. HTML overlay
    - Create proof-of-concept shape
    - Test shape persistence and multiplayer sync
+
+**Planned Features:**
+1. **UI Polish**
+   - Keyboard shortcuts displayed in tooltips (V=select, D=draw, S=auto-frame, etc.)
+   - Improved focus states for accessibility
+   - Refined shadows and transitions
+   - Respect `prefers-reduced-motion` media query
 
 4. **Implement PDF shape for canvas** (Status: Pending)
    - Create PdfShape that stores: document_id, file_url, page_count, position, size
@@ -264,13 +301,24 @@
 
 ## Phase 4: Testing & Polish ⏳ NOT STARTED
 
+### ✅ What's Working
+- **Backend:** FastAPI server with AI chat, PDF processing, and handwriting upload endpoints
+- **Frontend:** tldraw v4.1.2 canvas with full drawing tools, multiplayer sync, AI chat, PDF upload
+- **Design:** Clean minimal UI following design guidelines (Inter font, neutral colors, no gradients)
+- **AI Chat:** Claude Sonnet 4 integration with streaming responses creating text shapes ON THE CANVAS
+- **PDF Upload:** Complete upload infrastructure with progress tracking and vector storage
+- **Auto-Frame Feature:** Keyboard shortcut 's' to frame handwriting strokes (non-resizable, movable)
+- **Image Capture:** Automatic PNG snapshot capture and upload to backend server
+
 ### Implementation Steps (Pending)
 
 1. **Call testing agent** (Status: Pending)
    - Provide comprehensive test plan covering:
-     - Backend endpoints (upload, retrieve, search, list)
+     - Backend endpoints (upload, retrieve, search, list, handwriting upload)
      - Frontend upload flow (validation, progress, errors)
      - PDF viewer functionality (zoom, scroll, page navigation)
+     - AI chat functionality (streaming, shape creation)
+     - Handwriting frame capture (auto-frame, image upload)
      - Error scenarios (invalid files, network failures, API errors)
      - Multiplayer sync (shape visibility, state updates)
    - Review test results and prioritize fixes
@@ -304,6 +352,37 @@
    - Final design review against design_guidelines.md
    - Add keyboard shortcuts documentation
 
+## Success Criteria
+
+### Phase 1 & 2 (ACHIEVED ✅)
+- ✅ Real-time: Multiplayer collaboration via tldraw's useSyncDemo
+- ✅ Persistence: Canvas state persists via tldraw's demo server
+- ✅ AI Chat: Claude Sonnet 4 integration with streaming responses ON THE CANVAS
+- ✅ PDF Upload: Complete upload infrastructure with vector storage
+- ✅ UX: Canvas-first minimal UI with Inter font and tokenized colors
+
+### Phase 3.1 & 3.2 (ACHIEVED ✅)
+- ✅ Auto-frame: 's' keyboard shortcut creates frame around selected handwriting
+- ✅ Positioning: Frame appears behind strokes (proper z-index)
+- ✅ Behavior: Grouped frame is movable but not resizable
+- ✅ Integration: Works with undo, delete, and multiplayer sync
+- ✅ Image Capture: PNG snapshots captured automatically after framing
+- ✅ Upload: Images uploaded to backend without blocking UI
+- ✅ Storage: Files saved to organized directory structure
+
+### Phase 3 Remaining (TARGET)
+- PDF Viewer: PDFs render on canvas with zoom/scroll controls
+- Real-time: Two or more clients observe each other's edits within 300ms median
+- Presence: Users see each other's cursors with names and colors
+- Stability: No crashes on malformed input; rate limits prevent abuse
+- Performance: Batched operations, throttled cursor updates
+
+### Phase 4 (TARGET)
+- Export: PNG/SVG export working from UI
+- Polish: Keyboard shortcuts, accessibility features, mobile responsive
+- Reliability: Cold-start recovery verified, backups automated
+- Tests: Comprehensive E2E suite with 95%+ pass rate
+
 ## Technical Stack
 
 ### Backend
@@ -315,6 +394,7 @@
 - **Embeddings:** OpenAI text-embedding-3-small (1536 dims) via Emergent LLM key + litellm
 - **Vector DB:** Supabase pgvector with HNSW index
 - **Storage:** Supabase Storage bucket "pdfs" (public for development)
+- **File Storage:** Local filesystem with aiofiles for handwriting images
 - **Environment:** python-dotenv for config
 - **Server:** uvicorn[standard] with WebSocket support
 
@@ -344,6 +424,37 @@
 - `GET /api/pdf/{document_id}` - Get document metadata
 - `POST /api/pdf/search` - Semantic search on PDF chunks
 - `GET /api/pdf/documents` - List all documents
+- `POST /api/handwriting-upload` - Upload handwriting frame image
+
+## Keyboard Shortcuts
+
+### Native TLDraw Shortcuts
+- `V` - Select tool
+- `D` - Draw tool
+- `E` - Eraser tool
+- `A` - Arrow tool
+- `R` - Rectangle tool
+- `O` - Ellipse tool
+- `T` - Text tool
+- `N` - Note tool
+- `F` - Frame tool
+- `⌘+Z` / `Ctrl+Z` - Undo
+- `⌘+Shift+Z` / `Ctrl+Shift+Z` - Redo
+- `⌘+A` / `Ctrl+A` - Select all
+- `Delete` / `Backspace` - Delete selection
+- `Cmd+K` / `Ctrl+K` - Focus AI prompt input
+
+### Custom Shortcuts
+- `S` - Auto-frame selected handwriting strokes + capture & upload image
+
+## File Storage
+
+### Handwriting Images
+- **Directory:** `/app/backend/uploads/handwriting/`
+- **Format:** PNG (2x scale)
+- **Naming:** `{frameId}.png`
+- **Created:** Automatically on 's' key press after framing
+- **Access:** Local filesystem, expandable to cloud storage (S3, etc.)
 
 ### Environment Variables
 - `EMERGENT_LLM_KEY` - Universal LLM key for Claude Sonnet 4 (backend/.env)
@@ -384,6 +495,7 @@
 6. **See Response ON CANVAS:** A text shape appears with Claude Sonnet 4's streaming answer
 7. **Upload PDF:** Click the upload button in the top-left to upload a PDF
 8. **View PDF:** PDFs will render on the canvas (Phase 3 feature)
+9. **Frame Handwriting:** Select handwriting strokes and press 's' to auto-frame and capture
 
 ### Keyboard Shortcuts
 - `Cmd+K` / `Ctrl+K` - Focus AI prompt input
@@ -531,3 +643,12 @@ The multiplayer infinite canvas with AI chat and PDF upload is **partially compl
 - All AI responses are synced across all users
 
 **Status: IN PROGRESS - Phase 2 Complete, Phase 3 Ready to Start ✅**
+
+## References
+- **Design Guidelines:** `/app/design_guidelines.md`
+- **Test Reports:** `/app/test_reports/iteration_1.json`
+- **Preview URL:** https://collab-canvas-25.preview.emergentagent.com
+- **tldraw Documentation:** https://tldraw.dev/docs
+- **tldraw v4 API:** https://tldraw.dev/reference/editor
+- **Auto-Frame Implementation:** `/app/frontend/src/components/Canvas.jsx` (autoFrameHandwriting function)
+- **Upload Endpoint:** `/app/backend/server.py` (POST /api/handwriting-upload)

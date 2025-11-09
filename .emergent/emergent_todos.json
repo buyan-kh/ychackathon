@@ -26,5 +26,9 @@
   {
     "content": "Test PDF rendering with uploaded documents",
     "status": "completed"
+  },
+  {
+    "content": "Extend autoFrameHandwriting to capture and upload frame image to backend",
+    "status": "completed"
   }
 ]
