@@ -142,44 +142,27 @@ export default function Canvas() {
     if (!editor || !frameId) return;
 
     try {
-      // Capture frame as PNG with 2x scale
-      const result = await editor.getSvgString([frameId], { scale: 2, background: true });
+      console.log('Starting frame capture for:', frameId);
       
-      if (!result) {
-        console.error('Failed to capture frame image');
-        return;
-      }
-
-      // Convert SVG to blob
-      const svgBlob = new Blob([result.svg], { type: 'image/svg+xml' });
+      // Give tldraw a moment to render the frame
+      await new Promise(resolve => setTimeout(resolve, 100));
       
-      // For PNG, we need to render the SVG to canvas first
-      const img = new Image();
-      const svgUrl = URL.createObjectURL(svgBlob);
-      
-      await new Promise((resolve, reject) => {
-        img.onload = resolve;
-        img.onerror = reject;
-        img.src = svgUrl;
+      // Capture frame as blob using tldraw's export API
+      const blob = await editor.exportToBlob({
+        ids: [frameId],
+        format: 'png',
+        opts: {
+          scale: 2,
+          background: true,
+        },
       });
 
-      // Create canvas and render image
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      
-      // Clean up
-      URL.revokeObjectURL(svgUrl);
-
-      // Convert canvas to blob
-      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-
       if (!blob) {
-        console.error('Failed to create PNG blob');
+        console.error('Failed to capture frame image - blob is null');
         return;
       }
+
+      console.log('Frame captured, blob size:', blob.size);
 
       // Upload to backend
       const formData = new FormData();
@@ -188,6 +171,8 @@ export default function Canvas() {
       formData.append('timestamp', new Date().toISOString());
 
       const backendUrl = process.env.REACT_APP_BACKEND_URL || '';
+      console.log('Uploading to:', `${backendUrl}/api/handwriting-upload`);
+      
       const response = await fetch(`${backendUrl}/api/handwriting-upload`, {
         method: 'POST',
         body: formData,
