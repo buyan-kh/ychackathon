@@ -6,5 +6,17 @@
   {
     "content": "Test auto-frame functionality - verify frame creation, reparenting, grouping, and native TLDraw behaviors (undo, delete, multiplayer sync)",
     "status": "completed"
+  },
+  {
+    "content": "Fix shape ID validation error - select frameId instead of invalid groupId",
+    "status": "completed"
+  },
+  {
+    "content": "Fix frame positioning - ensure frame appears behind strokes using sendToBack",
+    "status": "completed"
+  },
+  {
+    "content": "Implement non-resizable behavior - add noResize meta flag and beforeChange handler",
+    "status": "completed"
   }
 ]
