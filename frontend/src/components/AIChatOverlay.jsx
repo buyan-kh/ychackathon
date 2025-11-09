@@ -41,16 +41,19 @@ export default function AIChatOverlay({ editor }) {
     const x = viewport.x + viewport.w / 2 - 300;
     const y = viewport.y + viewport.h / 2 - 200;
     
-    // Create a note shape with prompt
+    // Create a geo shape (rectangle) with text
     editor.createShape({
       id: noteId,
-      type: 'note',
+      type: 'geo',
       x,
       y,
       props: {
-        text: `Q: ${promptText}\n\nGenerating AI response...`,
+        w: 600,
+        h: 400,
+        geo: 'rectangle',
         color: 'light-blue',
-        size: 'm',
+        fill: 'solid',
+        text: `Q: ${promptText}\n\nGenerating AI response...`,
       },
     });
     
