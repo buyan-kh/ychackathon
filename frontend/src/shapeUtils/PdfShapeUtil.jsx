@@ -18,6 +18,21 @@ const PdfViewerComponent = memo(({ shape }) => {
   const documentId = shape.props.documentId;
   const filename = shape.props.filename || 'document.pdf';
 
+  // Memoize file and options objects to prevent unnecessary reloads
+  const fileConfig = React.useMemo(() => ({
+    url: documentUrl,
+    httpHeaders: {
+      'Access-Control-Allow-Origin': '*',
+    },
+    withCredentials: false,
+  }), [documentUrl]);
+
+  const pdfOptions = React.useMemo(() => ({
+    cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
+    cMapPacked: true,
+    standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
+  }), []);
+
   const onDocumentLoadSuccess = ({ numPages }) => {
     console.log('PDF loaded successfully:', documentUrl, 'Pages:', numPages);
     setNumPages(numPages);
@@ -154,29 +169,22 @@ const PdfViewerComponent = memo(({ shape }) => {
           </div>
         )}
         <Document
-          file={{
-            url: documentUrl,
-            httpHeaders: {
-              'Access-Control-Allow-Origin': '*',
-            },
-            withCredentials: false,
-          }}
+          key={documentUrl}
+          file={fileConfig}
           onLoadSuccess={onDocumentLoadSuccess}
           onLoadError={onDocumentLoadError}
           loading=""
-          options={{
-            cMapUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/cmaps/`,
-            cMapPacked: true,
-            standardFontDataUrl: `https://unpkg.com/pdfjs-dist@${pdfjs.version}/standard_fonts/`,
-          }}
+          options={pdfOptions}
         >
-          <Page
-            pageNumber={pageNumber}
-            scale={scale}
-            renderTextLayer={true}
-            renderAnnotationLayer={true}
-            loading=""
-          />
+          {numPages && (
+            <Page
+              pageNumber={pageNumber}
+              scale={scale}
+              renderTextLayer={true}
+              renderAnnotationLayer={true}
+              loading=""
+            />
+          )}
         </Document>
       </div>
 
