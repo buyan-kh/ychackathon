@@ -149,6 +149,40 @@ async def apply_updates(room_id: str, update: SnapshotUpdate):
         print(f"Error applying update: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/handwriting-upload")
+async def upload_handwriting_image(
+    file: UploadFile = File(...),
+    frameId: Optional[str] = Form(None),
+    timestamp: Optional[str] = Form(None)
+):
+    """Upload handwriting frame image"""
+    try:
+        # Create uploads directory if it doesn't exist
+        upload_dir = "/app/backend/uploads/handwriting"
+        os.makedirs(upload_dir, exist_ok=True)
+        
+        # Generate filename using frameId or timestamp
+        filename = f"{frameId or datetime.now(timezone.utc).timestamp()}.png"
+        file_path = os.path.join(upload_dir, filename)
+        
+        # Save file asynchronously
+        async with aiofiles.open(file_path, 'wb') as f:
+            content = await file.read()
+            await f.write(content)
+        
+        print(f"Uploaded handwriting image: {filename}")
+        
+        return {
+            "success": True,
+            "path": file_path,
+            "filename": filename,
+            "frameId": frameId,
+            "timestamp": timestamp
+        }
+    except Exception as e:
+        print(f"Error uploading image: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.websocket("/api/ws/rooms/{room_id}")
 async def websocket_endpoint(websocket: WebSocket, room_id: str):
     await manager.connect(websocket, room_id)
