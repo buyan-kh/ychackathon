@@ -7,7 +7,7 @@ import axios from 'axios';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
 
-export const PdfUploadButton = ({ onUploadSuccess }) => {
+export const PdfUploadButton = ({ onUploadSuccess, iconOnly = false }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
 
@@ -101,16 +101,54 @@ export const PdfUploadButton = ({ onUploadSuccess }) => {
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogTrigger asChild>
-        <Button
-          variant="secondary"
-          size="sm"
-          className="gap-2"
-          disabled={isUploading}
-          data-testid="pdf-upload-trigger-button"
-        >
-          <Upload className="h-4 w-4" />
-          Upload PDF
-        </Button>
+        {iconOnly ? (
+          <button
+            disabled={isUploading}
+            style={{
+              padding: '12px',
+              background: '#10B981',
+              color: 'white',
+              border: 'none',
+              borderRadius: '8px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 8px rgba(16, 185, 129, 0.3)',
+              transition: 'all 0.2s',
+              width: '44px',
+              height: '44px',
+              opacity: isUploading ? 0.5 : 1
+            }}
+            onMouseEnter={(e) => {
+              if (!isUploading) {
+                e.target.style.background = '#059669';
+                e.target.style.transform = 'translateY(-1px)';
+                e.target.style.boxShadow = '0 4px 12px rgba(16, 185, 129, 0.4)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.background = '#10B981';
+              e.target.style.transform = 'translateY(0)';
+              e.target.style.boxShadow = '0 2px 8px rgba(16, 185, 129, 0.3)';
+            }}
+            title="Upload PDF"
+            data-testid="pdf-upload-trigger-button"
+          >
+            <Upload size={20} />
+          </button>
+        ) : (
+          <Button
+            variant="secondary"
+            size="sm"
+            className="gap-2"
+            disabled={isUploading}
+            data-testid="pdf-upload-trigger-button"
+          >
+            <Upload className="h-4 w-4" />
+            Upload PDF
+          </Button>
+        )}
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
