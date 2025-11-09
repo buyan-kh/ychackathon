@@ -5,6 +5,6 @@
   },
   {
     "content": "Test auto-frame functionality - verify frame creation, reparenting, grouping, and native TLDraw behaviors (undo, delete, multiplayer sync)",
-    "status": "in_progress"
+    "status": "completed"
   }
 ]
