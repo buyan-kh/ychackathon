@@ -21,6 +21,7 @@ import { PdfShapeUtil } from "../shapeUtils/PdfShapeUtil";
 import { VideoCallShapeUtil } from "../shapeUtils/VideoCallShapeUtil";
 import { C1ResponseShapeUtil } from "../shapeUtils/C1ResponseShapeUtil";
 import { EmbedShapeUtil } from "../shapeUtils/EmbedShapeUtil";
+import { MeetingSummaryShapeUtil } from "../shapeUtils/MeetingSummaryShapeUtil";
 import axios from "axios";
 import "tldraw/tldraw.css";
 
@@ -60,6 +61,7 @@ const customShapeUtils = [
   VideoCallShapeUtil,
   C1ResponseShapeUtil,
   EmbedShapeUtil,
+  MeetingSummaryShapeUtil,
 ];
 
 const collectTextShapeIds = (seedIds, editor) => {
@@ -133,6 +135,7 @@ export default function Canvas() {
           y: centerY - 300, // Center the shape (half of default height)
           props: {
             roomUrl: response.data.url,
+            token: response.data.token, // Token with transcription permissions
             w: 800,
             h: 600,
           },
@@ -306,19 +309,19 @@ export default function Canvas() {
     if (!richText || typeof richText !== "object") {
       return "";
     }
-    
+
     // If it's a text node, return the text directly
     if (richText.type === "text" && richText.text) {
       return richText.text;
     }
-    
+
     // If it has content array, recursively extract text from all children
     if (Array.isArray(richText.content)) {
       return richText.content
         .map((node) => extractTextFromRichText(node))
         .join("");
     }
-    
+
     return "";
   };
 
@@ -335,23 +338,24 @@ export default function Canvas() {
 
       if (shape.type === "text") {
         const bounds = editor.getShapePageBounds(shape.id);
-        
+
         // Extract text from tldraw text shapes
         // tldraw stores text in richText structure (ProseMirror format)
         let textContent = "";
-        
+
         // Method 1: Extract from richText structure (most common in newer tldraw)
         if (shape.props?.richText) {
           textContent = extractTextFromRichText(shape.props.richText);
         }
-        
+
         // Method 2: Direct props.text (fallback for older format)
         if (!textContent && shape.props?.text) {
-          textContent = typeof shape.props.text === "string" 
-            ? shape.props.text 
-            : String(shape.props.text);
+          textContent =
+            typeof shape.props.text === "string"
+              ? shape.props.text
+              : String(shape.props.text);
         }
-        
+
         // Method 3: Try using editor API if available
         if (!textContent && editor.getShapeUtil) {
           try {
@@ -363,7 +367,7 @@ export default function Canvas() {
             // Ignore errors
           }
         }
-        
+
         results.push({
           id: shape.id,
           text: textContent,
@@ -485,7 +489,7 @@ export default function Canvas() {
         props: entry.props,
         fullEntry: entry,
       });
-      
+
       return {
         shapeId: entry.id,
         text: entry.text,
