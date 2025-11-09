@@ -28,6 +28,7 @@ export default function Canvas() {
 
     // Filter to handwriting shapes (draw strokes that aren't closed)
     const handwritingIds = [];
+    const handwritingShapes = [];
     for (const id of selectedIds) {
       const shape = editor.getShape(id);
       if (!shape) continue;
@@ -35,6 +36,7 @@ export default function Canvas() {
       // Check if it's a draw shape that's not closed
       if (shape.type === 'draw' && !shape.props.isClosed) {
         handwritingIds.push(id);
+        handwritingShapes.push(shape);
       }
     }
 
@@ -72,13 +74,19 @@ export default function Canvas() {
 
     // Wrap all operations in editor.run for proper history/sync
     editor.run(() => {
-      // Create frame shape
+      // Get the lowest index from handwriting shapes to place frame behind
+      const lowestIndex = handwritingShapes.reduce((lowest, shape) => {
+        return shape.index < lowest ? shape.index : lowest;
+      }, handwritingShapes[0].index);
+
+      // Create frame shape with index behind all strokes
       const frameId = createShapeId();
       editor.createShape({
         id: frameId,
         type: 'frame',
         x: minX,
         y: minY,
+        index: `a${lowestIndex}`, // Place frame behind by prepending to index
         props: {
           w: frameWidth,
           h: frameHeight,
