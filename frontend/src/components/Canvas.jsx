@@ -14,6 +14,7 @@ import C1PlusButton from "./C1PlusButton";
 import { PdfShapeUtil } from "../shapeUtils/PdfShapeUtil";
 import { VideoCallShapeUtil } from "../shapeUtils/VideoCallShapeUtil";
 import { C1ResponseShapeUtil } from "../shapeUtils/C1ResponseShapeUtil";
+import { MeetingSummaryShapeUtil } from "../shapeUtils/MeetingSummaryShapeUtil";
 import axios from "axios";
 import "tldraw/tldraw.css";
 
@@ -52,6 +53,7 @@ const customShapeUtils = [
   PdfShapeUtil,
   VideoCallShapeUtil,
   C1ResponseShapeUtil,
+  MeetingSummaryShapeUtil,
 ];
 
 export default function Canvas() {
@@ -89,6 +91,7 @@ export default function Canvas() {
           y: centerY - 300, // Center the shape (half of default height)
           props: {
             roomUrl: response.data.url,
+            token: response.data.token, // Token with transcription permissions
             w: 800,
             h: 600,
           },

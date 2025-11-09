@@ -106,18 +106,40 @@ async def get_or_create_video_room(request: VideoRoomRequest):
         get_url = f"https://api.daily.co/v1/rooms/{room_name}"
         get_response = requests.get(get_url, headers=headers)
 
+        room_url = None
         if get_response.status_code == 200:
             # Room exists
             room_data = get_response.json()
+            room_url = room_data["url"]
             logger.info(f"Found existing Daily.co room: {room_name}")
-            return {
-                "url": room_data["url"],
-                "room_name": room_data["name"],
-                "created": False
-            }
         elif get_response.status_code == 404:
             # Room doesn't exist, create it
             logger.info(f"Room {room_name} not found, creating new room")
+
+            create_url = "https://api.daily.co/v1/rooms"
+            room_config = {
+                "name": room_name,
+                "properties": {
+                    "enable_screenshare": True,
+                    "enable_chat": True,
+                    "start_video_off": False,
+                    "start_audio_off": False,
+                    "enable_recording": "cloud"
+                }
+            }
+
+            create_response = requests.post(create_url, headers=headers, json=room_config)
+
+            if create_response.status_code in [200, 201]:
+                room_data = create_response.json()
+                room_url = room_data["url"]
+                logger.info(f"Created new Daily.co room: {room_name}")
+            else:
+                logger.error(f"Daily.co API POST error: {create_response.status_code} - {create_response.text}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to create Daily.co room: {create_response.text}"
+                )
         else:
             # Other error from GET request (e.g., 401, 403, 500)
             logger.error(f"Daily.co API GET error: {get_response.status_code} - {get_response.text}")
@@ -126,41 +148,169 @@ async def get_or_create_video_room(request: VideoRoomRequest):
                 detail=f"Failed to check Daily.co room: {get_response.text}"
             )
 
-        # Room doesn't exist, create it
-        create_url = "https://api.daily.co/v1/rooms"
-        room_config = {
-            "name": room_name,
+        # Create a meeting token with transcription admin permissions
+        logger.info(f"Creating meeting token with transcription permissions for room: {room_name}")
+        token_url = "https://api.daily.co/v1/meeting-tokens"
+        token_payload = {
             "properties": {
-                "enable_screenshare": True,
-                "enable_chat": True,
-                "start_video_off": False,
-                "start_audio_off": False,
-                "enable_recording": "cloud"
+                "room_name": room_name,
+                "is_owner": True,
+                "user_name": "Canvas User"
             }
         }
 
-        create_response = requests.post(create_url, headers=headers, json=room_config)
+        token_response = requests.post(token_url, headers=headers, json=token_payload)
 
-        if create_response.status_code in [200, 201]:
-            room_data = create_response.json()
-            logger.info(f"Created new Daily.co room: {room_name}")
-            return {
-                "url": room_data["url"],
-                "room_name": room_data["name"],
-                "created": True
-            }
+        if token_response.status_code in [200, 201]:
+            token_data = token_response.json()
+            meeting_token = token_data["token"]
+            logger.info(f"✅ Created meeting token with transcription permissions")
         else:
-            logger.error(f"Daily.co API POST error: {create_response.status_code} - {create_response.text}")
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to create Daily.co room: {create_response.text}"
-            )
+            logger.error(f"Failed to create meeting token: {token_response.text}")
+            raise HTTPException(status_code=500, detail="Failed to create meeting token")
+
+        return {
+            "url": room_url,
+            "token": meeting_token,
+            "room_name": room_name
+        }
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error getting/creating video room: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+# Meeting Summary Endpoints
+class GenerateSummaryRequest(BaseModel):
+    transcript: str
+    room_id: str
+
+@app.post("/api/video/generate-summary")
+async def generate_instant_summary(request: GenerateSummaryRequest):
+    """Generate instant summary from transcript using streaming LLM in C1 format"""
+    logger.info("=" * 80)
+    logger.info("🤖 INSTANT SUMMARY REQUEST RECEIVED")
+    logger.info(f"Transcript length: {len(request.transcript)} characters")
+    logger.info(f"Room ID: {request.room_id}")
+    logger.info("=" * 80)
+
+    if not request.transcript or len(request.transcript.strip()) == 0:
+        logger.warning("⚠️  Empty transcript provided")
+        # Return error as SSE stream
+        async def error_stream():
+            yield f"data: {json.dumps({'error': 'Empty transcript'})}\n\n"
+        return StreamingResponse(
+            error_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no"
+            }
+        )
+
+    async def generate_summary_stream():
+        try:
+            # Use OpenAI with Thesys C1 for rich UI generation
+            from openai import AsyncOpenAI
+
+            client = AsyncOpenAI(
+                base_url="https://api.thesys.dev/v1/embed",
+                api_key=os.getenv("THESYS_API_KEY")
+            )
+
+            logger.info("🤖 Sending to Thesys C1 for summary generation...")
+
+            # Calculate metadata
+            word_count = len(request.transcript.split())
+
+            # Send metadata first
+            metadata = {
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "transcriptLength": word_count,
+            }
+            yield f"data: {json.dumps({'metadata': metadata})}\n\n"
+
+            # Create streaming completion with C1 model
+            stream = await client.chat.completions.create(
+                model="c1/anthropic/claude-sonnet-4/v-20250930",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": """You are a meeting summarizer that creates rich, well-formatted summaries.
+
+Create a comprehensive meeting summary with:
+- **Main Topics Discussed**: Key subjects covered in the meeting
+- **Key Decisions Made**: Important decisions and agreements
+- **Action Items**: Tasks assigned with owners if mentioned
+- **Important Points**: Notable insights or concerns raised
+
+Use markdown formatting:
+- Use **bold** for section headers
+- Use bullet points (•) for lists
+- Use numbered lists for action items
+- Keep it organized and easy to scan"""
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Summarize this meeting transcript:\n\n{request.transcript}"
+                    }
+                ],
+                stream=True
+            )
+
+            # Stream the C1 response
+            full_summary = ""
+            async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        full_summary += delta.content
+                        # Yield in SSE format
+                        yield f"data: {json.dumps({'content': delta.content})}\n\n"
+
+            yield "data: [DONE]\n\n"
+
+            # Store in database asynchronously (don't block the stream)
+            asyncio.create_task(store_summary_in_db(
+                full_summary,
+                request.transcript,
+                request.room_id
+            ))
+
+            logger.info("✅ Summary stream complete!")
+
+        except Exception as e:
+            logger.error(f"❌ Error generating summary: {e}", exc_info=True)
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(
+        generate_summary_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
+
+
+async def store_summary_in_db(summary: str, transcript: str, room_id: str):
+    """Store summary in database asynchronously"""
+    try:
+        summary_data = {
+            "summary_text": summary,
+            "transcript_text": transcript,
+            "room_id": room_id,
+            "status": "completed",
+            "generation_method": "realtime_c1"
+        }
+        storage.client.table("meeting_summaries").insert(summary_data).execute()
+        logger.info("✅ Summary stored in database")
+    except Exception as e:
+        logger.error(f"❌ Error storing summary: {e}", exc_info=True)
+
 
 @app.post("/api/ask")
 async def ask_stream(request: PromptRequest):

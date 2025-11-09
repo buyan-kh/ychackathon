@@ -1,14 +1,164 @@
-import { BaseBoxShapeUtil, HTMLContainer } from 'tldraw';
+import { BaseBoxShapeUtil, HTMLContainer, useEditor, createShapeId } from 'tldraw';
 import React, { memo, useEffect, useRef, useState } from 'react';
 import DailyIframe from '@daily-co/daily-js';
+import { createArrowBetweenShapes } from '../utils/connection';
+
+const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
 
 // Memoized video call component
 const VideoCallComponent = memo(({ shape }) => {
+  const editor = useEditor();
   const containerRef = useRef(null);
   const [callFrame, setCallFrame] = useState(null);
   const [error, setError] = useState(null);
+  const transcriptChunksRef = useRef([]);
 
   const roomUrl = shape.props.roomUrl;
+
+  // Function to create and stream summary using C1 pattern
+  const createStreamingSummary = async (transcript) => {
+    console.log('📝 Creating streaming summary on canvas...');
+
+    if (!editor) {
+      console.error('❌ No editor instance available');
+      return;
+    }
+
+    try {
+      // Get the video call shape's position
+      const videoShape = editor.getShape(shape.id);
+      if (!videoShape) {
+        console.error('❌ Could not find video call shape');
+        return;
+      }
+
+      // Position summary to the right of video call
+      const summaryX = videoShape.x + videoShape.props.w + 50;
+      const summaryY = videoShape.y;
+
+      console.log('📍 Creating summary shape at position:', { x: summaryX, y: summaryY });
+
+      // Create the meeting-summary shape
+      const summaryShapeId = createShapeId();
+      editor.createShape({
+        id: summaryShapeId,
+        type: 'meeting-summary',
+        x: summaryX,
+        y: summaryY,
+        props: {
+          w: 600,
+          h: 300,
+          summaryContent: '',
+          isStreaming: false,
+          metadata: null
+        }
+      });
+
+      console.log('📡 Starting streaming summary generation...');
+
+      // Stream the summary from backend
+      const response = await fetch(`${backendUrl}/api/video/generate-summary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          transcript,
+          room_id: 'default'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`API error: ${response.statusText}`);
+      }
+
+      const decoder = new TextDecoder();
+      const reader = response.body?.getReader();
+
+      if (!reader) {
+        throw new Error('Response body not found');
+      }
+
+      let accumulatedContent = '';
+      let metadata = null;
+      let hasStartedStreaming = false;
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        const lines = chunk.split('\n');
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+
+            if (data === '[DONE]') {
+              console.log('✅ Summary streaming complete!');
+              editor.updateShape({
+                id: summaryShapeId,
+                type: 'meeting-summary',
+                props: {
+                  summaryContent: accumulatedContent,
+                  isStreaming: false,
+                  metadata
+                }
+              });
+
+              // Create arrow connection between video call and summary
+              createArrowBetweenShapes(editor, shape.id, summaryShapeId);
+              break;
+            }
+
+            try {
+              const parsed = JSON.parse(data);
+
+              // Handle metadata
+              if (parsed.metadata) {
+                metadata = parsed.metadata;
+                console.log('📊 Received metadata:', metadata);
+              }
+
+              // Handle content streaming
+              if (parsed.content) {
+                if (!hasStartedStreaming) {
+                  hasStartedStreaming = true;
+                  editor.updateShape({
+                    id: summaryShapeId,
+                    type: 'meeting-summary',
+                    props: { isStreaming: true }
+                  });
+                }
+
+                accumulatedContent += parsed.content;
+                editor.updateShape({
+                  id: summaryShapeId,
+                  type: 'meeting-summary',
+                  props: {
+                    summaryContent: accumulatedContent,
+                    isStreaming: true,
+                    metadata
+                  }
+                });
+              }
+
+              if (parsed.error) {
+                throw new Error(parsed.error);
+              }
+            } catch (e) {
+              // Skip invalid JSON - might be partial chunk
+              continue;
+            }
+          }
+        }
+      }
+
+      console.log('✅ Summary shape created and populated successfully!');
+    } catch (error) {
+      console.error('❌ Error creating summary:', error);
+      console.error('Error details:', error.message, error.stack);
+    }
+  };
 
   useEffect(() => {
     if (!roomUrl || !containerRef.current) return;
@@ -41,12 +191,84 @@ const VideoCallComponent = memo(({ shape }) => {
         }
       });
 
-      frame.join({ url: roomUrl });
+      // Join with token for transcription permissions
+      // Extract token from roomUrl if it's passed as a prop, otherwise join with just URL
+      const joinOptions = shape.props.token
+        ? { url: roomUrl, token: shape.props.token }
+        : { url: roomUrl };
+
+      frame.join(joinOptions).then(async () => {
+        console.log('✅ Joined video call successfully');
+
+        // Wait a moment for the call to fully initialize
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        console.log('🎤 Starting transcription...');
+
+        // Listen for BOTH transcription event types to see which one works
+        frame.on('transcription-message', (event) => {
+          console.log('📝 transcription-message event (NEW API):', event);
+          console.log('Full event object:', JSON.stringify(event, null, 2));
+
+          // Try to extract text from common locations
+          const text = event.text || event.data?.text || event.rawText;
+          if (text) {
+            transcriptChunksRef.current.push(text);
+            console.log('✅ Captured text:', text);
+          }
+        });
+
+        frame.on('app-message', (event) => {
+          if (event.fromId === 'transcription') {
+            console.log('📝 app-message transcription event (OLD API):', event);
+            console.log('Full event object:', JSON.stringify(event, null, 2));
+
+            if (event.data?.is_final && event.data?.text) {
+              transcriptChunksRef.current.push(event.data.text);
+              console.log('✅ Captured text (is_final):', event.data.text);
+            }
+          }
+        });
+
+        try {
+          await frame.startTranscription();
+          console.log('✅ Transcription started successfully!');
+          console.log('📝 Listening for transcription events...');
+        } catch (err) {
+          console.error('❌ Failed to start transcription:', err);
+          console.error('Error details:', err.message, err.stack);
+        }
+      }).catch((err) => {
+        console.error('❌ Failed to join call:', err);
+      });
+
       setCallFrame(frame);
 
-      // Handle leave event
-      frame.on('left-meeting', () => {
-        console.log('User left meeting');
+      // Handle leave event - generate streaming summary from transcript
+      frame.on('left-meeting', async () => {
+        console.log('👋 User left meeting');
+
+        try {
+          // Note: Transcription automatically stops when leaving, no need to call stopTranscription()
+          console.log('📝 Processing transcript...');
+
+          // Get full transcript
+          const fullTranscript = transcriptChunksRef.current.join(' ').trim();
+          console.log('📝 Full transcript captured:', fullTranscript);
+          console.log('📊 Transcript length:', fullTranscript.length, 'characters');
+          console.log('📊 Number of chunks:', transcriptChunksRef.current.length);
+
+          if (fullTranscript.length > 0) {
+            // Create streaming summary using C1 pattern
+            await createStreamingSummary(fullTranscript);
+          } else {
+            console.warn('⚠️  No transcript captured - cannot generate summary');
+            console.warn('Make sure you spoke during the call for transcription to work');
+          }
+        } catch (error) {
+          console.error('❌ Error generating summary:', error);
+          console.error('Error details:', error.message);
+        }
       });
 
       frame.on('error', (error) => {
@@ -155,6 +377,7 @@ export class VideoCallShapeUtil extends BaseBoxShapeUtil {
       w: 800,
       h: 600,
       roomUrl: '',
+      token: '',
     };
   }
 
