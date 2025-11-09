@@ -62,10 +62,71 @@ async def health_check():
 
 @app.post("/api/ask")
 async def ask_stream(request: PromptRequest):
-    """Stream Claude Sonnet 4 chat completion response - DISABLED (emergentintegrations not available)"""
-    return JSONResponse(
-        content={"error": "AI chat is disabled. Install emergentintegrations to enable."},
-        status_code=503
+    """Stream Thesys C1 generative UI response"""
+    from openai import AsyncOpenAI
+    
+    async def generate_c1_response():
+        try:
+            # Initialize OpenAI client with Thesys base URL
+            client = AsyncOpenAI(
+                base_url="https://api.thesys.dev/v1/embed",
+                api_key=os.getenv("THESYS_API_KEY")
+            )
+            
+            messages = [
+                {
+                    "role": "system",
+                    "content": """You are a helpful AI assistant that generates rich, interactive UI responses.
+When answering questions:
+- Use markdown formatting for better readability
+- Create tables for comparisons
+- Use lists for step-by-step instructions
+- Use code blocks with syntax highlighting for code examples
+- Be concise but informative
+- Generate visual, card-like responses when appropriate"""
+                },
+                {
+                    "role": "user",
+                    "content": request.prompt
+                }
+            ]
+            
+            # Add context if provided
+            if request.context:
+                messages.append({
+                    "role": "system",
+                    "content": f"Additional context: {request.context}"
+                })
+            
+            # Create streaming completion
+            stream = await client.chat.completions.create(
+                model="c1/anthropic/claude-sonnet-4/v-20250930",
+                messages=messages,
+                stream=True
+            )
+            
+            # Stream the response
+            async for chunk in stream:
+                if chunk.choices and len(chunk.choices) > 0:
+                    delta = chunk.choices[0].delta
+                    if delta.content:
+                        # Yield in SSE format
+                        yield f"data: {json.dumps({'content': delta.content})}\n\n"
+            
+            yield "data: [DONE]\n\n"
+            
+        except Exception as e:
+            logger.error(f"C1 streaming error: {e}")
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+    
+    return StreamingResponse(
+        generate_c1_response(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
     )
 
 # Initialize PDF processor

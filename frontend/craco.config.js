@@ -35,6 +35,14 @@ const webpackConfig = {
       '@': path.resolve(__dirname, 'src'),
     },
     configure: (webpackConfig) => {
+      
+      // Fix for @thesysai/genui-sdk and @crayonai/react-ui ES module issues
+      webpackConfig.module.rules.push({
+        test: /\.m?js$/,
+        resolve: {
+          fullySpecified: false, // Disable the behavior
+        },
+      });
 
       // Disable hot reload completely if environment variable is set
       if (config.disableHotReload) {

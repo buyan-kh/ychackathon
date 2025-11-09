@@ -5,6 +5,7 @@ import { createShapeId } from '@tldraw/editor';
 import PromptInput from './PromptInput';
 import { PdfUploadButton } from './PdfUploadButton';
 import { PdfShapeUtil } from '../shapeUtils/PdfShapeUtil';
+import { C1ResponseShapeUtil } from '../shapeUtils/C1ResponseShapeUtil';
 import 'tldraw/tldraw.css';
 
 const FOCUS_EVENT_NAME = 'focus-prompt-input';
@@ -30,7 +31,7 @@ const components = {
 };
 
 // Custom shape utilities
-const customShapeUtils = [PdfShapeUtil];
+const customShapeUtils = [PdfShapeUtil, C1ResponseShapeUtil];
 
 export default function Canvas() {
   const editorRef = useRef(null);

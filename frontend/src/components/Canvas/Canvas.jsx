@@ -20,7 +20,7 @@ export default function Canvas({ roomId }) {
   // Initialize store
   useEffect(() => {
     const newStore = createTLStore({
-      shapeUtils: defaultShapeUtils,
+      shapeUtils: [...defaultShapeUtils],
     });
     setStore(newStore);
   }, []);

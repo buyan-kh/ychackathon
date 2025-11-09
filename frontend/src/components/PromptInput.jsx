@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { createShapeId, toRichText, useEditor } from 'tldraw';
+import { createShapeId, useEditor } from 'tldraw';
 
 const backendUrl = process.env.REACT_APP_BACKEND_URL;
 
@@ -32,82 +32,111 @@ export default function PromptInput({ focusEventName }) {
   const createAITextShape = async (promptText) => {
     if (!promptText.trim()) return;
 
-    const textId = createShapeId();
+    const c1ShapeId = createShapeId();
     
     // Get viewport center
     const viewport = editor.getViewportPageBounds();
     const x = viewport.x + (viewport.w / 2) - 300;
     const y = viewport.y + (viewport.h / 2) - 150;
     
-    // Create TEXT shape ON THE CANVAS using richText!
+    // Create C1 Response shape ON THE CANVAS
     editor.createShape({
-      id: textId,
-      type: 'text',
+      id: c1ShapeId,
+      type: 'c1-response',
       x,
       y,
       props: {
-        richText: toRichText(`Q: ${promptText}\n\nAI: Thinking...`),
-        scale: 1.2,
+        w: 600,
+        h: 300,
+        prompt: promptText,
+        c1Response: '',
+        isStreaming: true,
       },
     });
     
     // Zoom to the shape
-    editor.zoomToSelection([textId], { duration: 200, inset: 100 });
+    editor.zoomToSelection([c1ShapeId], { duration: 200, inset: 100 });
     
     try {
+      const apiUrl = backendUrl || 'http://localhost:8001';
+      console.log('Fetching from:', `${apiUrl}/api/ask`);
+      
       // Stream AI response
-      const response = await fetch(`${backendUrl}/api/ask`, {
+      const response = await fetch(`${apiUrl}/api/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt: promptText }),
       });
 
-      if (!response.ok) throw new Error('API error');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
-      const reader = response.body?.getReader();
+      if (!response.body) {
+        throw new Error('No response body');
+      }
+
+      const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let aiResponse = '';
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
+          const chunk = decoder.decode(value, { stream: true });
+          const lines = chunk.split('\n');
 
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6);
-            if (data === '[DONE]') break;
+          for (const line of lines) {
+            if (!line.trim() || !line.startsWith('data: ')) continue;
+            
+            const data = line.slice(6).trim();
+            if (data === '[DONE]' || !data) continue;
 
             try {
               const parsed = JSON.parse(data);
               if (parsed.content) {
                 aiResponse += parsed.content;
                 
-                // Update TEXT shape ON THE CANVAS with streaming richText
+                // Update C1 Response shape with streaming content
                 editor.updateShape({
-                  id: textId,
-                  type: 'text',
+                  id: c1ShapeId,
+                  type: 'c1-response',
                   props: {
-                    richText: toRichText(`Q: ${promptText}\n\nAI: ${aiResponse}`),
+                    c1Response: aiResponse,
+                    isStreaming: true,
                   },
                 });
               }
             } catch (e) {
-              // Skip invalid JSON
+              // Skip invalid JSON chunks
+              console.warn('JSON parse error:', e.message);
             }
           }
         }
+      } finally {
+        reader.releaseLock();
       }
+      
+      // Mark streaming as complete
+      editor.updateShape({
+        id: c1ShapeId,
+        type: 'c1-response',
+        props: {
+          isStreaming: false,
+        },
+      });
       
     } catch (error) {
       console.error('AI request failed:', error);
+      console.error('Backend URL:', backendUrl);
       editor.updateShape({
-        id: textId,
-        type: 'text',
+        id: c1ShapeId,
+        type: 'c1-response',
         props: {
-          richText: toRichText(`Q: ${promptText}\n\nAI: Error - ${error.message}`),
+          c1Response: `<content thesys="true">{"component": {"component": "Card", "props": {"children": [{"component": "Header", "props": {"title": "Error"}}, {"component": "TextContent", "props": {"textMarkdown": "Failed to generate response: ${error.message}"}}]}}}}</content>`,
+          isStreaming: false,
         },
       });
     }
