@@ -576,6 +576,7 @@ class SupabaseRAGStorage:
         shape_ids: List[str],
         handwriting_limit_per_note: int = 3,
         pdf_limit_per_document: int = 3,
+        typed_limit_per_note: int = 3,
     ) -> List[Dict]:
         contexts: List[Dict] = []
         contexts.extend(
@@ -583,6 +584,9 @@ class SupabaseRAGStorage:
         )
         contexts.extend(
             self.get_pdf_context_for_shapes(shape_ids, chunk_limit_per_document=pdf_limit_per_document)
+        )
+        contexts.extend(
+            self.get_typed_context_for_frames(shape_ids, chunk_limit_per_note=typed_limit_per_note)
         )
         return contexts
 
@@ -626,6 +630,172 @@ class SupabaseRAGStorage:
                     }
                 )
         return matches
+
+    def insert_typed_note(
+        self,
+        frame_id: str,
+        room_id: Optional[str],
+        page_bounds: Optional[Dict],
+        text_shapes: List[Dict],
+        status: str = "ready",
+    ) -> str:
+        payload = {
+            "frame_id": frame_id,
+            "room_id": room_id,
+            "page_bounds": page_bounds,
+            "metadata": {"text_shapes": text_shapes},
+            "status": status,
+        }
+
+        try:
+            response = self.client.table("typed_notes").upsert(
+                payload,
+                on_conflict="frame_id",
+                returning='representation'
+            ).execute()
+            note_id = response.data[0]["id"]
+            self.logger.info("Upserted typed note %s for frame %s", note_id, frame_id)
+            return note_id
+        except Exception as e:
+            self.logger.error("Failed to upsert typed note: %s", e, exc_info=True)
+            raise
+
+    def replace_typed_note_chunks(
+        self,
+        note_id: str,
+        chunks: List[Dict],
+        embeddings: List[List[float]],
+    ) -> int:
+        if not chunks:
+            self.client.table("typed_note_chunks").delete().eq("note_id", note_id).execute()
+            return 0
+
+        rows = []
+        for chunk, embedding in zip(chunks, embeddings):
+            rows.append(
+                {
+                    "note_id": note_id,
+                    "chunk_index": chunk.get("chunk_index", 0),
+                    "chunk_text": chunk.get("text", ""),
+                    "embedding": embedding,
+                    "metadata": chunk.get("metadata", {}),
+                }
+            )
+
+        try:
+            self.client.table("typed_note_chunks").delete().eq("note_id", note_id).execute()
+            batch_size = 50
+            total_inserted = 0
+            for i in range(0, len(rows), batch_size):
+                batch = rows[i : i + batch_size]
+                self.client.table("typed_note_chunks").insert(batch).execute()
+                total_inserted += len(batch)
+            self.logger.info("Inserted %s typed note chunks for note %s", total_inserted, note_id)
+            return total_inserted
+        except Exception as e:
+            self.logger.error("Failed to replace typed note chunks: %s", e, exc_info=True)
+            raise
+
+    def get_typed_context_for_frames(
+        self,
+        frame_ids: List[str],
+        chunk_limit_per_note: int = 3,
+    ) -> List[Dict]:
+        if not frame_ids:
+            return []
+
+        try:
+            notes_resp = (
+                self.client.table("typed_notes")
+                .select("id,frame_id,metadata")
+                .in_("frame_id", frame_ids)
+                .execute()
+            )
+        except Exception as e:
+            self.logger.error("Failed to fetch typed notes: %s", e, exc_info=True)
+            return []
+
+        contexts: List[Dict] = []
+        for note in notes_resp.data or []:
+            try:
+                chunks_resp = (
+                    self.client.table("typed_note_chunks")
+                    .select("id,chunk_text,chunk_index,metadata")
+                    .eq("note_id", note["id"])
+                    .order("chunk_index")
+                    .limit(chunk_limit_per_note)
+                    .execute()
+                )
+            except Exception as e:
+                self.logger.error("Failed to fetch typed note chunks: %s", e, exc_info=True)
+                continue
+
+            for chunk in chunks_resp.data or []:
+                contexts.append(
+                    {
+                        "source_type": "typed",
+                        "frame_id": note["frame_id"],
+                        "note_id": note["id"],
+                        "chunk_id": chunk["id"],
+                        "text": chunk.get("chunk_text", ""),
+                        "metadata": chunk.get("metadata") or {},
+                        "chunk_index": chunk.get("chunk_index"),
+                    }
+                )
+        return contexts
+
+    def search_typed_context(
+        self,
+        frame_ids: List[str],
+        query_embedding: List[float],
+        limit_per_note: int = 5,
+        threshold: float = 0.2,
+    ) -> List[Dict]:
+        if not frame_ids:
+            return []
+
+        try:
+            notes_resp = (
+                self.client.table("typed_notes")
+                .select("id,frame_id")
+                .in_("frame_id", frame_ids)
+                .execute()
+            )
+        except Exception as e:
+            self.logger.error("Failed to fetch typed notes for search: %s", e, exc_info=True)
+            return []
+
+        matches: List[Dict] = []
+        for note in notes_resp.data or []:
+            try:
+                resp = self.client.rpc(
+                    "match_typed_note_chunks",
+                    {
+                        "query_embedding": query_embedding,
+                        "match_threshold": threshold,
+                        "match_count": limit_per_note,
+                        "filter_note_id": note["id"],
+                    },
+                ).execute()
+            except Exception as e:
+                self.logger.error("Typed note match RPC failed: %s", e, exc_info=True)
+                continue
+
+            for row in resp.data or []:
+                matches.append(
+                    {
+                        "source_type": "typed",
+                        "frame_id": note["frame_id"],
+                        "note_id": note["id"],
+                        "chunk_id": row["id"],
+                        "text": row.get("chunk_text", ""),
+                        "metadata": row.get("metadata") or {},
+                        "similarity": row.get("similarity"),
+                    }
+                )
+        return matches
+
+
 
     def search_pdf_context(
         self,
@@ -691,6 +861,7 @@ class SupabaseRAGStorage:
         query_embedding: List[float],
         handwriting_limit_per_note: int = 5,
         pdf_limit_per_document: int = 5,
+        typed_limit_per_note: int = 5,
         threshold: float = 0.2,
     ) -> List[Dict]:
         matches: List[Dict] = []
@@ -702,6 +873,11 @@ class SupabaseRAGStorage:
         matches.extend(
             self.search_pdf_context(
                 shape_ids, query_embedding, limit_per_document=pdf_limit_per_document, threshold=threshold
+            )
+        )
+        matches.extend(
+            self.search_typed_context(
+                shape_ids, query_embedding, limit_per_note=typed_limit_per_note, threshold=threshold
             )
         )
         # sort by similarity descending if available

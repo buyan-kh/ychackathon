@@ -54,6 +54,18 @@ class PromptRequest(BaseModel):
     context: str | None = None
     shape_ids: Optional[List[str]] = None
 
+class TypedNoteShape(BaseModel):
+    shapeId: str
+    text: str
+    order: Optional[int] = None
+    props: Optional[dict] = None
+
+class TypedNoteSyncRequest(BaseModel):
+    frameId: str
+    roomId: Optional[str] = "default"
+    bounds: Optional[dict] = None
+    textShapes: List[TypedNoteShape]
+
 
 def format_selection_context(entries: List[Dict]) -> str:
     if not entries:
@@ -62,13 +74,18 @@ def format_selection_context(entries: List[Dict]) -> str:
     for idx, entry in enumerate(entries, start=1):
         snippet = (entry.get("text") or "").strip().replace("\n", " ")
         snippet = " ".join(snippet.split())
-        if entry.get("source_type") == "handwriting":
+        source_type = entry.get("source_type")
+        if source_type == "handwriting":
             label = f"Handwriting frame {entry.get('frame_id')}"
-        else:
+        elif source_type == "pdf":
             doc_label = entry.get("filename") or entry.get("document_id")
             page = entry.get("page_number")
             page_suffix = f" (page {page})" if page is not None else ""
             label = f"PDF {doc_label}{page_suffix}"
+        elif source_type == "typed":
+            label = f"Typed note {entry.get('frame_id')}"
+        else:
+            label = "Context"
         similarity = entry.get("similarity")
         sim_text = f" [similarity {similarity:.2f}]" if isinstance(similarity, (int, float)) else ""
         lines.append(f"{idx}. {label}{sim_text}: {snippet}")
@@ -180,11 +197,17 @@ async def ask_stream(request: PromptRequest):
                 query_embedding,
                 handwriting_limit_per_note=5,
                 pdf_limit_per_document=5,
+                typed_limit_per_note=5,
                 threshold=0.2,
             )
         except Exception as e:
             logger.error("Failed generating embeddings or searching context: %s", e, exc_info=True)
-            selection_context_entries = storage.get_context_for_shape_ids(selected_shape_ids)
+            selection_context_entries = storage.get_context_for_shape_ids(
+                selected_shape_ids,
+                handwriting_limit_per_note=5,
+                pdf_limit_per_document=5,
+                typed_limit_per_note=5,
+            )
 
         selection_context_text = format_selection_context(selection_context_entries)
     else:
@@ -521,6 +544,77 @@ async def upload_handwriting_image(
     except Exception as e:
         logger.error(f"Error uploading handwriting image: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/typed-note")
+async def sync_typed_note(request: TypedNoteSyncRequest):
+    if not request.textShapes:
+        raise HTTPException(status_code=400, detail="No text shapes provided")
+
+    try:
+        text_shapes_payload = []
+        chunk_texts = []
+        chunk_metadata = []
+
+        sorted_shapes = sorted(
+            request.textShapes,
+            key=lambda s: (s.order if s.order is not None else 0),
+        )
+
+        for index, shape in enumerate(sorted_shapes):
+            text_value = (shape.text or "").strip()
+            shape_payload = {
+                "shape_id": shape.shapeId,
+                "text": shape.text,
+                "order": shape.order if shape.order is not None else index,
+                "props": shape.props or {},
+            }
+            text_shapes_payload.append(shape_payload)
+
+            if text_value:
+                chunk_texts.append(text_value)
+                chunk_metadata.append(
+                    {
+                        "shape_id": shape.shapeId,
+                        "order": shape_payload["order"],
+                        "props": shape.props or {},
+                    }
+                )
+
+        note_id = storage.insert_typed_note(
+            frame_id=request.frameId,
+            room_id=request.roomId,
+            page_bounds=request.bounds,
+            text_shapes=text_shapes_payload,
+            status="ready",
+        )
+
+        embeddings = []
+        if chunk_texts:
+            embeddings = embedding_gen.generate_embeddings(chunk_texts)
+
+        chunks_payload = []
+        for idx, text_value in enumerate(chunk_texts):
+            chunks_payload.append(
+                {
+                    "text": text_value,
+                    "chunk_index": idx,
+                    "metadata": chunk_metadata[idx],
+                }
+            )
+
+        storage.replace_typed_note_chunks(note_id, chunks_payload, embeddings)
+
+        return {
+            "success": True,
+            "note_id": note_id,
+            "frameId": request.frameId,
+            "chunk_count": len(chunks_payload),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to sync typed note: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to sync typed note")
 
 if __name__ == "__main__":
     import uvicorn

@@ -109,12 +109,15 @@ export default function PromptInput({ focusEventName }) {
       let currentShape = shape;
       // Walk up to find a handwriting frame if applicable
       while (currentShape) {
-        if (
-          currentShape.type === 'frame' &&
-          currentShape.meta?.handwritingNoteId
-        ) {
-          resolved.add(currentShape.id);
-          return;
+        if (currentShape.type === 'frame') {
+          if (currentShape.meta?.handwritingNoteId) {
+            resolved.add(currentShape.id);
+            return;
+          }
+          if (currentShape.meta?.typedNoteId) {
+            resolved.add(currentShape.id);
+            return;
+          }
         }
         const parent = editor.getShapeParent(currentShape);
         if (!parent) break;
@@ -167,12 +170,10 @@ export default function PromptInput({ focusEventName }) {
 
     const selectedShapeIds = resolveSelectionForContext();
     const c1ShapeId = createShapeId();
-    
     const newShapeWidth = 600;
     const newShapeHeight = 300;
     const padding = 50;
 
-    // Helper function to check if a position would overlap with existing shapes
     const checkOverlap = (x, y) => {
       const existingShapes = editor.getCurrentPageShapes();
       return existingShapes.some((shape) => {
@@ -188,60 +189,48 @@ export default function PromptInput({ focusEventName }) {
       });
     };
 
-    // Try to position relative to the first selected shape
     let position;
     if (selectedShapeIds.length > 0) {
       const firstSelectedId = selectedShapeIds[0];
       const shapePageBounds = editor.getShapePageBounds(firstSelectedId);
 
       if (shapePageBounds) {
-        // Define positions relative to the selected shape in priority order
         const positions = [
           {
-            // Right
             x: shapePageBounds.maxX + padding,
             y: shapePageBounds.center.y - newShapeHeight / 2,
           },
           {
-            // Below
             x: shapePageBounds.center.x - newShapeWidth / 2,
             y: shapePageBounds.maxY + padding,
           },
           {
-            // Left
             x: shapePageBounds.x - newShapeWidth - padding,
             y: shapePageBounds.center.y - newShapeHeight / 2,
           },
           {
-            // Above
             x: shapePageBounds.center.x - newShapeWidth / 2,
             y: shapePageBounds.y - newShapeHeight - padding,
           },
         ];
 
-        // Find first position that doesn't overlap
         let validPosition = positions.find((pos) => !checkOverlap(pos.x, pos.y));
 
-        // If all immediate positions overlap, try positions with increased distance
         if (!validPosition) {
           const extendedPositions = [
             {
-              // Right with 2x padding
               x: shapePageBounds.maxX + padding * 2,
               y: shapePageBounds.center.y - newShapeHeight / 2,
             },
             {
-              // Below with 2x padding
               x: shapePageBounds.center.x - newShapeWidth / 2,
               y: shapePageBounds.maxY + padding * 2,
             },
             {
-              // Right with 3x padding
               x: shapePageBounds.maxX + padding * 3,
               y: shapePageBounds.center.y - newShapeHeight / 2,
             },
             {
-              // Below with 3x padding
               x: shapePageBounds.center.x - newShapeWidth / 2,
               y: shapePageBounds.maxY + padding * 3,
             },
@@ -250,34 +239,25 @@ export default function PromptInput({ focusEventName }) {
         }
 
         if (validPosition) {
-          // Use the first valid position relative to selected shape
           position = validPosition;
         } else {
-          // All relative positions overlap, fall back to global optimal positioning
           position = getOptimalShapePosition(editor, {
             width: newShapeWidth,
             height: newShapeHeight,
             padding,
           });
         }
-      } else {
-        // Fallback to optimal positioning if shape bounds can't be determined
-        position = getOptimalShapePosition(editor, {
-          width: newShapeWidth,
-          height: newShapeHeight,
-          padding,
-        });
       }
-    } else {
-      // No selection, use global optimal positioning
+    }
+
+    if (!position) {
       position = getOptimalShapePosition(editor, {
         width: newShapeWidth,
         height: newShapeHeight,
         padding,
       });
     }
-    
-    // Create C1 Response shape ON THE CANVAS
+
     editor.run(() => {
       editor.createShape({
         id: c1ShapeId,
@@ -285,8 +265,8 @@ export default function PromptInput({ focusEventName }) {
         x: position.x,
         y: position.y,
         props: {
-          w: 600,
-          h: 300,
+          w: responseSize.w,
+          h: responseSize.h,
           prompt: promptText,
           c1Response: '',
           isStreaming: true,
@@ -297,20 +277,16 @@ export default function PromptInput({ focusEventName }) {
         connectSourcesToResponse(selectedShapeIds, c1ShapeId);
       }
     });
-    
-    // Automatically center camera on the new shape after a brief delay
-    // to ensure the shape is fully rendered
+
     requestAnimationFrame(() => {
       setTimeout(() => {
         centerCameraOnShape(editor, c1ShapeId, { duration: 300 });
       }, 100);
     });
-    
+
     try {
-      const apiUrl = backendUrl || 'http://localhost:8000';
+      const apiUrl = backendUrl || 'http://localhost:8001';
       console.log('Fetching from:', `${apiUrl}/api/ask`);
-      
-      // Stream AI response
       const response = await fetch(`${apiUrl}/api/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -342,7 +318,7 @@ export default function PromptInput({ focusEventName }) {
 
           for (const line of lines) {
             if (!line.trim() || !line.startsWith('data: ')) continue;
-            
+
             const data = line.slice(6).trim();
             if (data === '[DONE]' || !data) continue;
 
@@ -350,8 +326,7 @@ export default function PromptInput({ focusEventName }) {
               const parsed = JSON.parse(data);
               if (parsed.content) {
                 aiResponse += parsed.content;
-                
-                // Update C1 Response shape with streaming content
+
                 editor.updateShape({
                   id: c1ShapeId,
                   type: 'c1-response',
@@ -362,7 +337,6 @@ export default function PromptInput({ focusEventName }) {
                 });
               }
             } catch (e) {
-              // Skip invalid JSON chunks
               console.warn('JSON parse error:', e.message);
             }
           }
@@ -370,8 +344,7 @@ export default function PromptInput({ focusEventName }) {
       } finally {
         reader.releaseLock();
       }
-      
-      // Mark streaming as complete
+
       editor.updateShape({
         id: c1ShapeId,
         type: 'c1-response',
@@ -379,7 +352,6 @@ export default function PromptInput({ focusEventName }) {
           isStreaming: false,
         },
       });
-      
     } catch (error) {
       console.error('AI request failed:', error);
       console.error('Backend URL:', backendUrl);
@@ -387,12 +359,13 @@ export default function PromptInput({ focusEventName }) {
         id: c1ShapeId,
         type: 'c1-response',
         props: {
-          c1Response: `<content thesys="true">{"component": {"component": "Card", "props": {"children": [{"component": "Header", "props": {"title": "Error"}}, {"component": "TextContent", "props": {"textMarkdown": "Failed to generate response: ${error.message}"}}]}}}}</content>`,
+          c1Response: `<content thesys="true">{"component": {"component": "Card", "props": {"children": [{"component": "Header", "props": {"title": "Error"}}, {"component": "TextContent", "props": {"textMarkdown": "Failed to generate response: ${error.message}"}}]}}}</content>`,
           isStreaming: false,
         },
       });
     }
   };
+
 
   return (
     <>

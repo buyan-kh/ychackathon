@@ -203,3 +203,69 @@ $$;
 COMMENT ON TABLE handwriting_notes IS 'Stores metadata and OCR text for handwriting frames';
 COMMENT ON TABLE handwriting_chunks IS 'Stores OCR chunks + embeddings for handwriting frames';
 COMMENT ON FUNCTION match_handwriting_chunks IS 'Performs semantic similarity search on handwriting chunks';
+
+-- Typed note tables
+CREATE TABLE IF NOT EXISTS typed_notes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    frame_id TEXT UNIQUE NOT NULL,
+    room_id TEXT,
+    storage_path TEXT,
+    page_bounds JSONB,
+    stroke_ids TEXT[],
+    status TEXT NOT NULL DEFAULT 'ready',
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS typed_note_chunks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    note_id UUID NOT NULL REFERENCES typed_notes(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    chunk_text TEXT NOT NULL,
+    embedding VECTOR(1536),
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_typed_notes_frame_id ON typed_notes(frame_id);
+CREATE INDEX IF NOT EXISTS idx_typed_note_chunks_note_id ON typed_note_chunks(note_id);
+CREATE INDEX IF NOT EXISTS idx_typed_note_chunks_embedding
+    ON typed_note_chunks USING hnsw (embedding vector_cosine_ops)
+    WITH (m = 16, ef_construction = 64);
+
+CREATE OR REPLACE FUNCTION match_typed_note_chunks(
+    query_embedding VECTOR(1536),
+    match_threshold FLOAT DEFAULT 0.7,
+    match_count INT DEFAULT 10,
+    filter_note_id UUID DEFAULT NULL
+)
+RETURNS TABLE (
+    id UUID,
+    note_id UUID,
+    chunk_text TEXT,
+    similarity FLOAT,
+    metadata JSONB
+)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    RETURN QUERY
+    SELECT
+        tnc.id,
+        tnc.note_id,
+        tnc.chunk_text,
+        1 - (tnc.embedding <=> query_embedding) AS similarity,
+        tnc.metadata
+    FROM typed_note_chunks tnc
+    WHERE 
+        (filter_note_id IS NULL OR tnc.note_id = filter_note_id)
+        AND 1 - (tnc.embedding <=> query_embedding) > match_threshold
+    ORDER BY tnc.embedding <=> query_embedding
+    LIMIT match_count;
+END;
+$$;
+
+COMMENT ON TABLE typed_notes IS 'Stores metadata for typed text notes on the canvas';
+COMMENT ON TABLE typed_note_chunks IS 'Stores typed note chunks + embeddings';
+COMMENT ON FUNCTION match_typed_note_chunks IS 'Performs semantic similarity search on typed note chunks';
