@@ -120,7 +120,7 @@ export default function Canvas() {
     });
   };
 
-  // Define custom overrides for keyboard shortcuts and tools
+  // Define custom overrides for keyboard shortcuts and component behavior
   const overrides = useMemo(() => ({
     actions(editor, actions) {
       return {
@@ -134,10 +134,6 @@ export default function Canvas() {
           },
         },
       };
-    },
-    tools(editor, tools) {
-      // Disable resize for frames named "Handwriting Frame"
-      return tools;
     },
   }), []);
 
