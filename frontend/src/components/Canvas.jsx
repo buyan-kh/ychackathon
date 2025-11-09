@@ -1,4 +1,10 @@
-import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useMemo,
+  useCallback,
+} from "react";
 import {
   Tldraw,
   DefaultToolbar,
@@ -14,6 +20,7 @@ import C1PlusButton from "./C1PlusButton";
 import { PdfShapeUtil } from "../shapeUtils/PdfShapeUtil";
 import { VideoCallShapeUtil } from "../shapeUtils/VideoCallShapeUtil";
 import { C1ResponseShapeUtil } from "../shapeUtils/C1ResponseShapeUtil";
+import { EmbedShapeUtil } from "../shapeUtils/EmbedShapeUtil";
 import { MeetingSummaryShapeUtil } from "../shapeUtils/MeetingSummaryShapeUtil";
 import axios from "axios";
 import "tldraw/tldraw.css";
@@ -60,6 +67,7 @@ const customShapeUtils = [
   PdfShapeUtil,
   VideoCallShapeUtil,
   C1ResponseShapeUtil,
+  EmbedShapeUtil,
   MeetingSummaryShapeUtil,
 ];
 
@@ -404,19 +412,19 @@ export default function Canvas() {
     if (!richText || typeof richText !== "object") {
       return "";
     }
-    
+
     // If it's a text node, return the text directly
     if (richText.type === "text" && richText.text) {
       return richText.text;
     }
-    
+
     // If it has content array, recursively extract text from all children
     if (Array.isArray(richText.content)) {
       return richText.content
         .map((node) => extractTextFromRichText(node))
         .join("");
     }
-    
+
     return "";
   };
 
@@ -433,23 +441,24 @@ export default function Canvas() {
 
       if (shape.type === "text") {
         const bounds = editor.getShapePageBounds(shape.id);
-        
+
         // Extract text from tldraw text shapes
         // tldraw stores text in richText structure (ProseMirror format)
         let textContent = "";
-        
+
         // Method 1: Extract from richText structure (most common in newer tldraw)
         if (shape.props?.richText) {
           textContent = extractTextFromRichText(shape.props.richText);
         }
-        
+
         // Method 2: Direct props.text (fallback for older format)
         if (!textContent && shape.props?.text) {
-          textContent = typeof shape.props.text === "string" 
-            ? shape.props.text 
-            : String(shape.props.text);
+          textContent =
+            typeof shape.props.text === "string"
+              ? shape.props.text
+              : String(shape.props.text);
         }
-        
+
         // Method 3: Try using editor API if available
         if (!textContent && editor.getShapeUtil) {
           try {
@@ -461,7 +470,7 @@ export default function Canvas() {
             // Ignore errors
           }
         }
-        
+
         results.push({
           id: shape.id,
           text: textContent,
@@ -617,7 +626,9 @@ export default function Canvas() {
 
     const backendUrl = process.env.REACT_APP_BACKEND_URL || "";
     if (!backendUrl) {
-      console.warn("REACT_APP_BACKEND_URL is not set; skipping typed note sync.");
+      console.warn(
+        "REACT_APP_BACKEND_URL is not set; skipping typed note sync."
+      );
       return;
     }
 
@@ -1032,7 +1043,6 @@ export default function Canvas() {
         components={components}
         onMount={handleMount}
         overrides={overrides}
-        shapeUtils={customShapeUtils}
       />
     </div>
   );

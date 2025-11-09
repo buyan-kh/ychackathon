@@ -32,6 +32,7 @@ from pdf_processor import (
 )
 from system_prompt import SYSTEM_PROMPT
 from image_search_tool import get_image_search_tool
+from embed_tool import get_embed_tool
 
 # Load environment variables
 load_dotenv()
@@ -362,7 +363,6 @@ async def store_summary_in_db(summary: str, transcript: str, room_id: str):
     except Exception as e:
         logger.error(f"❌ Error storing summary: {e}", exc_info=True)
 
-
 def parse_tool_arguments(tool_call: Dict) -> Dict:
     """
     Safely parse tool call arguments, handling edge cases.
@@ -461,15 +461,12 @@ async def ask_stream(request: PromptRequest):
                 {
                     "role": "system",
                     "content": SYSTEM_PROMPT
-                },
-                {
-                    "role": "user",
-                    "content": request.prompt
                 }
             ]
             
-            # Add context if provided
+            # Add context BEFORE the user prompt so the AI has it when reading the question
             if request.context:
+                logger.info("Adding conversation context (length: %d chars)", len(request.context))
                 messages.append({
                     "role": "system",
                     "content": f"Additional context: {request.context}"
@@ -480,6 +477,12 @@ async def ask_stream(request: PromptRequest):
                     "role": "system",
                     "content": selection_context_text
                 })
+            
+            # Add user prompt last so context is already loaded
+            messages.append({
+                "role": "user",
+                "content": request.prompt
+            })
             
             # Prepare tools (only if image search is enabled)
             tools = None
@@ -730,6 +733,88 @@ async def ask_stream(request: PromptRequest):
             "X-Accel-Buffering": "no"
         }
     )
+
+# Pydantic models for embed endpoints
+class CreateEmbedRequest(BaseModel):
+    prompt: str
+    embed_type: str  # "google_maps" or "youtube"
+    query: str
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
+@app.post("/api/create-embed")
+async def create_embed(request: CreateEmbedRequest):
+    """
+    Create an embed URL based on the request type.
+    For Google Maps: creates a search embed centered at the given location (or default)
+    For YouTube: searches for a video and returns the embed URL
+    """
+    try:
+        embed_tool = get_embed_tool()
+        
+        if request.embed_type == "google_maps":
+            if not embed_tool.google_maps_enabled:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Google Maps API key not configured"
+                )
+            
+            # Create Google Maps embed
+            embed_url = embed_tool.create_google_maps_embed(
+                query=request.query,
+                lat=request.lat,
+                lng=request.lng
+            )
+            
+            if not embed_url:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to create Google Maps embed"
+                )
+            
+            return {
+                "embedUrl": embed_url,
+                "service": "google_maps",
+                "query": request.query
+            }
+        
+        elif request.embed_type == "youtube":
+            if not embed_tool.youtube_enabled:
+                raise HTTPException(
+                    status_code=503,
+                    detail="YouTube API key not configured"
+                )
+            
+            # Search for video
+            video_id = await embed_tool.search_youtube_video(request.query)
+            
+            if not video_id:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No YouTube video found for: {request.query}"
+                )
+            
+            # Create YouTube embed
+            embed_url = embed_tool.create_youtube_embed(video_id)
+            
+            return {
+                "embedUrl": embed_url,
+                "service": "youtube",
+                "query": request.query,
+                "videoId": video_id
+            }
+        
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid embed_type: {request.embed_type}. Must be 'google_maps' or 'youtube'"
+            )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating embed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Initialize PDF processor
 SUPABASE_URL = os.getenv("SUPABASE_URL")

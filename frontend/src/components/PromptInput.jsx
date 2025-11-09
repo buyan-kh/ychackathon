@@ -165,6 +165,147 @@ export default function PromptInput({ focusEventName }) {
     };
   }, [editor, resolveSelectionForContext]);
 
+  const createEmbedShape = async (promptText, embedData) => {
+    const embedShapeId = createShapeId();
+    const embedWidth = 600;
+    const embedHeight = 450;
+    const padding = 50;
+
+    // Get position for the embed shape
+    const viewport = editor.getViewportPageBounds();
+    const position = {
+      x: viewport.x + viewport.w / 2 - embedWidth / 2,
+      y: viewport.y + viewport.h / 2 - embedHeight / 2,
+    };
+
+    // Create the embed shape
+    editor.run(() => {
+      editor.createShape({
+        id: embedShapeId,
+        type: 'custom-embed',
+        x: position.x,
+        y: position.y,
+        props: {
+          w: embedWidth,
+          h: embedHeight,
+          embedUrl: embedData.embedUrl,
+          service: embedData.service,
+          query: embedData.query,
+        },
+      });
+    });
+
+    // Center camera on the new embed
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        centerCameraOnShape(editor, embedShapeId, { duration: 300 });
+      }, 100);
+    });
+  };
+
+  const handleIWantPrompt = async (promptText) => {
+    const lowerPrompt = promptText.toLowerCase().trim();
+    
+    // Check if it's an "I want" prompt
+    if (!lowerPrompt.startsWith('i want')) {
+      return false; // Not an "I want" prompt, use normal flow
+    }
+
+    // Parse intent
+    const isLearning = lowerPrompt.includes('to learn') || lowerPrompt.includes('to know');
+    
+    try {
+      if (isLearning) {
+        // YouTube embed for learning
+        const query = promptText.replace(/^i want to (learn|know)/i, '').trim();
+        
+        if (!query) {
+          console.warn('No query extracted from learning prompt');
+          return false;
+        }
+
+        const apiUrl = backendUrl || 'http://localhost:8001';
+        const response = await fetch(`${apiUrl}/api/create-embed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: promptText,
+            embed_type: 'youtube',
+            query: query,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to create YouTube embed: ${response.statusText}`);
+        }
+
+        const embedData = await response.json();
+        await createEmbedShape(promptText, embedData);
+        return true;
+        
+      } else {
+        // Google Maps embed for food/location
+        const query = promptText.replace(/^i want/i, '').trim();
+        
+        if (!query) {
+          console.warn('No query extracted from food prompt');
+          return false;
+        }
+
+        // Request geolocation
+        const getLocation = () => {
+          return new Promise((resolve) => {
+            if (!navigator.geolocation) {
+              console.warn('Geolocation not supported, using default location');
+              resolve({ lat: 37.7749, lng: -122.4194 }); // San Francisco default
+              return;
+            }
+
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                resolve({
+                  lat: position.coords.latitude,
+                  lng: position.coords.longitude,
+                });
+              },
+              (error) => {
+                console.warn('Geolocation permission denied, using default location');
+                resolve({ lat: 37.7749, lng: -122.4194 }); // San Francisco default
+              }
+            );
+          });
+        };
+
+        const location = await getLocation();
+        
+        const apiUrl = backendUrl || 'http://localhost:8001';
+        const response = await fetch(`${apiUrl}/api/create-embed`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: promptText,
+            embed_type: 'google_maps',
+            query: query,
+            lat: location.lat,
+            lng: location.lng,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to create Google Maps embed: ${response.statusText}`);
+        }
+
+        const embedData = await response.json();
+        await createEmbedShape(promptText, embedData);
+        return true;
+      }
+    } catch (error) {
+      console.error('Error creating embed:', error);
+      // Fall back to normal AI flow
+      return false;
+    }
+  };
+
   const createAITextShape = async (promptText) => {
     if (!promptText.trim()) return;
 
@@ -270,8 +411,8 @@ export default function PromptInput({ focusEventName }) {
         x: position.x,
         y: position.y,
         props: {
-          w: responseSize.w,
-          h: responseSize.h,
+          w: newShapeWidth,
+          h: newShapeHeight,
           prompt: promptText,
           c1Response: '',
           isStreaming: true,
@@ -438,10 +579,17 @@ export default function PromptInput({ focusEventName }) {
           inputRef.current.focus();
         }
       }}
-      onSubmit={(e) => {
+      onSubmit={async (e) => {
         e.preventDefault();
         if (prompt.trim()) {
-          createAITextShape(prompt);
+          // First check if it's an "I want" prompt
+          const handledAsEmbed = await handleIWantPrompt(prompt);
+          
+          // If not handled as embed, use normal AI flow
+          if (!handledAsEmbed) {
+            createAITextShape(prompt);
+          }
+          
           setPrompt('');
           setIsFocused(false);
           if (inputRef.current) inputRef.current.blur();

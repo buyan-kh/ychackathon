@@ -1,14 +1,17 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { useEditor } from 'tldraw';
-import { createShapeId } from '@tldraw/editor';
-import { createArrowBetweenShapes } from '../utils/connection';
-import { extractC1ShapeContext } from '../utils/c1Context';
-import { makeApiCall } from '../helpers/api';
-import { getOptimalShapePosition, centerCameraOnShape } from '../utils/shapePositioning';
+import React, { useState, useEffect, useCallback } from "react";
+import { useEditor } from "tldraw";
+import { createShapeId } from "@tldraw/editor";
+import { createArrowBetweenShapes } from "../utils/connection";
+import { extractC1ShapeContext } from "../utils/c1Context";
+import { makeApiCall } from "../helpers/api";
+import {
+  getOptimalShapePosition,
+  centerCameraOnShape,
+} from "../utils/shapePositioning";
 
 // Input field component that appears when plus button is clicked
 function InputField({ x, y, onSubmit, onCancel }) {
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState("");
   const inputRef = React.useRef(null);
 
   useEffect(() => {
@@ -22,12 +25,12 @@ function InputField({ x, y, onSubmit, onCancel }) {
     e.preventDefault();
     if (prompt.trim()) {
       onSubmit(prompt.trim());
-      setPrompt('');
+      setPrompt("");
     }
   };
 
   const handleKeyDown = (e) => {
-    if (e.key === 'Escape') {
+    if (e.key === "Escape") {
       onCancel();
     }
   };
@@ -35,31 +38,31 @@ function InputField({ x, y, onSubmit, onCancel }) {
   return (
     <div
       style={{
-        position: 'absolute',
+        position: "absolute",
         left: x,
         top: y,
         zIndex: 10001,
-        pointerEvents: 'all',
+        pointerEvents: "all",
       }}
       onClick={(e) => e.stopPropagation()}
     >
       <form
         onSubmit={handleSubmit}
         style={{
-          display: 'flex',
-          alignItems: 'center',
-          position: 'relative',
-          padding: '12px 20px',
-          borderRadius: '16px',
-          border: '1px solid #E5E7EB',
-          fontSize: '16px',
-          transition: 'all 0.3s ease-in-out',
-          gap: '8px',
-          boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-          minHeight: '60px',
-          width: '400px',
-          background: '#FFFFFF',
-          color: '#111827',
+          display: "flex",
+          alignItems: "center",
+          position: "relative",
+          padding: "12px 20px",
+          borderRadius: "16px",
+          border: "1px solid #E5E7EB",
+          fontSize: "16px",
+          transition: "all 0.3s ease-in-out",
+          gap: "8px",
+          boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+          minHeight: "60px",
+          width: "400px",
+          background: "#FFFFFF",
+          color: "#111827",
         }}
       >
         <input
@@ -72,27 +75,27 @@ function InputField({ x, y, onSubmit, onCancel }) {
           placeholder="Ask anything..."
           style={{
             flex: 1,
-            border: 'none',
-            outline: 'none',
-            background: 'transparent',
-            color: 'inherit',
-            fontSize: 'inherit',
+            border: "none",
+            outline: "none",
+            background: "transparent",
+            color: "inherit",
+            fontSize: "inherit",
           }}
         />
         <button
           type="submit"
           disabled={!prompt.trim()}
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: '36px',
-            height: '36px',
-            borderRadius: '8px',
-            border: 'none',
-            background: prompt.trim() ? '#3B82F6' : '#CBD5E1',
-            color: '#FFFFFF',
-            cursor: prompt.trim() ? 'pointer' : 'not-allowed',
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "36px",
+            height: "36px",
+            borderRadius: "8px",
+            border: "none",
+            background: prompt.trim() ? "#3B82F6" : "#CBD5E1",
+            color: "#FFFFFF",
+            cursor: prompt.trim() ? "pointer" : "not-allowed",
           }}
           onMouseDown={(e) => {
             e.preventDefault();
@@ -117,7 +120,7 @@ export default function C1PlusButton() {
     const updateSelection = () => {
       const selectedShapes = editor.getSelectedShapes();
       const c1Shape = selectedShapes.find(
-        (shape) => shape.type === 'c1-response'
+        (shape) => shape.type === "c1-response"
       );
 
       if (c1Shape) {
@@ -263,7 +266,9 @@ export default function C1PlusButton() {
           ];
 
           // Find first position that doesn't overlap
-          let validPosition = positions.find((pos) => !checkOverlap(pos.x, pos.y));
+          let validPosition = positions.find(
+            (pos) => !checkOverlap(pos.x, pos.y)
+          );
 
           // If all immediate positions overlap, try positions with increased distance
           if (!validPosition) {
@@ -289,7 +294,9 @@ export default function C1PlusButton() {
                 y: shapePageBounds.maxY + padding * 3,
               },
             ];
-            validPosition = extendedPositions.find((pos) => !checkOverlap(pos.x, pos.y));
+            validPosition = extendedPositions.find(
+              (pos) => !checkOverlap(pos.x, pos.y)
+            );
           }
 
           if (validPosition) {
@@ -324,7 +331,7 @@ export default function C1PlusButton() {
         // Create the shape at the calculated position
         editor.createShape({
           id: shapeId,
-          type: 'c1-response',
+          type: "c1-response",
           x: newX,
           y: newY,
           props: {
@@ -345,19 +352,31 @@ export default function C1PlusButton() {
         const originShapeId = selectedC1Shape.id;
 
         // Build conversation context from the selected shape
-        const previousPrompt = selectedC1Shape.props.prompt || '';
-        const previousResponse = selectedC1Shape.props.c1Response || '';
-        
+        const previousPrompt = selectedC1Shape.props.prompt || "";
+        const previousResponse = selectedC1Shape.props.c1Response || "";
+
         // Create a focused context that includes the previous Q&A
-        let conversationContext = '';
+        let conversationContext = "";
         if (previousPrompt && previousResponse) {
           conversationContext = `Previous conversation:\nQ: ${previousPrompt}\nA: ${previousResponse}`;
+          console.log("📝 Building follow-up context from previous card:", {
+            previousPrompt: previousPrompt.substring(0, 100),
+            previousResponseLength: previousResponse.length,
+          });
         }
-        
+
         // Combine with additional canvas context
-        const combinedContext = conversationContext 
+        const combinedContext = conversationContext
           ? `${conversationContext}\n\n${additionalContext}`.trim()
           : additionalContext;
+        
+        if (combinedContext) {
+          console.log("✅ Sending combined context to API:", {
+            totalLength: combinedContext.length,
+            hasConversationContext: !!conversationContext,
+            hasAdditionalContext: !!additionalContext,
+          });
+        }
 
         // Make API call to populate the shape with content
         await makeApiCall({
@@ -367,14 +386,14 @@ export default function C1PlusButton() {
             createArrowBetweenShapes(editor, originShapeId, shapeId);
             editor.updateShape({
               id: shapeId,
-              type: 'c1-response',
+              type: "c1-response",
               props: { isStreaming: true },
             });
           },
           onResponseUpdate: (response) => {
             editor.updateShape({
               id: shapeId,
-              type: 'c1-response',
+              type: "c1-response",
               props: { c1Response: response, isStreaming: true },
             });
           },
@@ -383,13 +402,13 @@ export default function C1PlusButton() {
             if (!currentShape) return;
             editor.updateShape({
               id: shapeId,
-              type: 'c1-response',
+              type: "c1-response",
               props: { ...currentShape.props, isStreaming: false },
             });
           },
         });
       } catch (error) {
-        console.error('Failed to create C1 component:', error);
+        console.error("Failed to create C1 component:", error);
       }
     },
     [editor, selectedC1Shape]
@@ -413,11 +432,11 @@ export default function C1PlusButton() {
         // Plus button
         <div
           style={{
-            position: 'absolute',
+            position: "absolute",
             left: buttonPosition.x,
             top: buttonPosition.y,
             zIndex: 999,
-            pointerEvents: 'all',
+            pointerEvents: "all",
           }}
         >
           <button
@@ -425,31 +444,31 @@ export default function C1PlusButton() {
             className="w-6 h-6 bg-blue-500 hover:bg-blue-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             title="Add connected component"
             style={{
-              width: '24px',
-              height: '24px',
-              background: '#3B82F6',
-              color: 'white',
-              borderRadius: '50%',
-              border: 'none',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              cursor: 'pointer',
-              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-              transition: 'background-color 0.2s',
+              width: "24px",
+              height: "24px",
+              background: "#3B82F6",
+              color: "white",
+              borderRadius: "50%",
+              border: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+              transition: "background-color 0.2s",
             }}
             onMouseEnter={(e) => {
-              e.target.style.background = '#2563EB';
+              e.target.style.background = "#2563EB";
             }}
             onMouseLeave={(e) => {
-              e.target.style.background = '#3B82F6';
+              e.target.style.background = "#3B82F6";
             }}
           >
             <span
               style={{
-                fontSize: '14px',
-                fontWeight: 'bold',
-                lineHeight: '1',
+                fontSize: "14px",
+                fontWeight: "bold",
+                lineHeight: "1",
               }}
             >
               +
@@ -460,4 +479,3 @@ export default function C1PlusButton() {
     </>
   );
 }
-
