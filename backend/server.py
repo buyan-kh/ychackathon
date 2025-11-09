@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import os
 # from motor.motor_asyncio import AsyncIOMotorClient
 import json
+import requests
 from datetime import datetime, timezone
 import uuid
 from typing import Dict, List, Set, Optional
@@ -59,6 +60,76 @@ async def root():
 @app.get("/api/health")
 async def health_check():
     return {"status": "ok"}
+
+# Daily.co Video Call Endpoint
+class VideoRoomRequest(BaseModel):
+    room_id: str
+
+@app.post("/api/video/room")
+async def get_or_create_video_room(request: VideoRoomRequest):
+    """Get or create a Daily.co room for the canvas"""
+    try:
+        api_key = os.getenv("DAILY_API_KEY")
+        if not api_key:
+            raise HTTPException(status_code=500, detail="Daily.co API key not configured")
+
+        # Room name based on canvas room ID
+        room_name = f"canvas-{request.room_id}"
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        # Try to get existing room first
+        get_url = f"https://api.daily.co/v1/rooms/{room_name}"
+        response = requests.get(get_url, headers=headers)
+
+        if response.status_code == 200:
+            # Room exists
+            room_data = response.json()
+            logger.info(f"Found existing Daily.co room: {room_name}")
+            return {
+                "url": room_data["url"],
+                "room_name": room_data["name"],
+                "created": False
+            }
+
+        # Room doesn't exist, create it
+        create_url = "https://api.daily.co/v1/rooms"
+        room_config = {
+            "name": room_name,
+            "properties": {
+                "enable_screenshare": True,
+                "enable_chat": True,
+                "start_video_off": False,
+                "start_audio_off": False,
+                "enable_recording": "cloud"
+            }
+        }
+
+        response = requests.post(create_url, headers=headers, json=room_config)
+
+        if response.status_code in [200, 201]:
+            room_data = response.json()
+            logger.info(f"Created new Daily.co room: {room_name}")
+            return {
+                "url": room_data["url"],
+                "room_name": room_data["name"],
+                "created": True
+            }
+        else:
+            logger.error(f"Daily.co API error: {response.status_code} - {response.text}")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Failed to create Daily.co room: {response.text}"
+            )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting/creating video room: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/ask")
 async def ask_stream(request: PromptRequest):
@@ -360,4 +431,4 @@ async def upload_handwriting_image(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run("server:app", host="0.0.0.0", port=8001, reload=True)

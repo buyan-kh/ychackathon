@@ -5,7 +5,9 @@ import { createShapeId } from '@tldraw/editor';
 import PromptInput from './PromptInput';
 import { PdfUploadButton } from './PdfUploadButton';
 import { PdfShapeUtil } from '../shapeUtils/PdfShapeUtil';
+import { VideoCallShapeUtil } from '../shapeUtils/VideoCallShapeUtil';
 import { C1ResponseShapeUtil } from '../shapeUtils/C1ResponseShapeUtil';
+import axios from 'axios';
 import 'tldraw/tldraw.css';
 
 const FOCUS_EVENT_NAME = 'focus-prompt-input';
@@ -31,7 +33,7 @@ const components = {
 };
 
 // Custom shape utilities
-const customShapeUtils = [PdfShapeUtil, C1ResponseShapeUtil];
+const customShapeUtils = [PdfShapeUtil, VideoCallShapeUtil, C1ResponseShapeUtil];
 
 export default function Canvas() {
   const editorRef = useRef(null);
@@ -41,6 +43,46 @@ export default function Canvas() {
     roomId: DEFAULT_ROOM_ID,
     shapeUtils: customShapeUtils,
   });
+
+  // Handle video call join - create as draggable canvas shape
+  const handleJoinVideoCall = async () => {
+    try {
+      const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8001';
+      const response = await axios.post(`${backendUrl}/api/video/room`, {
+        room_id: DEFAULT_ROOM_ID
+      });
+
+      // Create a video call shape on the canvas
+      if (editorRef.current) {
+        const editor = editorRef.current;
+        const shapeId = createShapeId();
+
+        // Get viewport center
+        const viewport = editor.getViewportPageBounds();
+        const centerX = viewport.x + viewport.w / 2;
+        const centerY = viewport.y + viewport.h / 2;
+
+        editor.createShape({
+          id: shapeId,
+          type: 'video-call',
+          x: centerX - 400, // Center the shape (half of default width)
+          y: centerY - 300, // Center the shape (half of default height)
+          props: {
+            roomUrl: response.data.url,
+            w: 800,
+            h: 600,
+          },
+        });
+
+        // Select the newly created shape
+        editor.setSelectedShapes([shapeId]);
+      }
+    } catch (error) {
+      console.error('Failed to get video room:', error);
+      alert('Failed to join video call. Please try again.');
+    }
+  };
+
 
   // Register Cmd+K shortcut
   useEffect(() => {
@@ -367,6 +409,49 @@ export default function Canvas() {
         <PdfUploadButton onUploadSuccess={handleUploadSuccess} />
       </div>
 
+      {/* Video call button overlay */}
+      <div style={{
+        position: 'absolute',
+        top: '16px',
+        right: '16px',
+        zIndex: 1000
+      }}>
+        <button
+          onClick={handleJoinVideoCall}
+          style={{
+            padding: '10px 16px',
+            background: '#3B82F6',
+            color: 'white',
+            border: 'none',
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: '500',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            boxShadow: '0 2px 8px rgba(59, 130, 246, 0.3)',
+            transition: 'all 0.2s'
+          }}
+          onMouseEnter={(e) => {
+            e.target.style.background = '#2563EB';
+            e.target.style.transform = 'translateY(-1px)';
+            e.target.style.boxShadow = '0 4px 12px rgba(59, 130, 246, 0.4)';
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.background = '#3B82F6';
+            e.target.style.transform = 'translateY(0)';
+            e.target.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.3)';
+          }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M23 7l-7 5 7 5V7z" />
+            <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+          </svg>
+          Join Video Call
+        </button>
+      </div>
+
       {/* tldraw canvas */}
       <Tldraw
         store={store}
@@ -375,6 +460,7 @@ export default function Canvas() {
         overrides={overrides}
         shapeUtils={customShapeUtils}
       />
+
     </div>
   );
 }
