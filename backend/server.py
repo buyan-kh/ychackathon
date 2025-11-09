@@ -222,11 +222,10 @@ async def websocket_endpoint(websocket: WebSocket, room_id: str):
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_ANON_KEY")
 OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-# Emergent universal key requires their gateway base URL
-OPENAI_BASE_URL = "https://api.emergentagent.com/v1"
 
-pdf_processor = PDFProcessor(SUPABASE_URL, SUPABASE_KEY, OPENAI_KEY, OPENAI_BASE_URL)
-embedding_gen = EmbeddingGenerator(OPENAI_KEY, base_url=OPENAI_BASE_URL)
+# Use litellm with Emergent universal key
+pdf_processor = PDFProcessor(SUPABASE_URL, SUPABASE_KEY, OPENAI_KEY, openai_base_url=None)
+embedding_gen = EmbeddingGenerator(OPENAI_KEY, base_url=None)
 storage = SupabaseRAGStorage(SUPABASE_URL, SUPABASE_KEY)
 
 # Pydantic models for PDF endpoints
