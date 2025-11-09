@@ -446,6 +446,267 @@ class SupabaseRAGStorage:
         except Exception as e:
             self.logger.error("Failed to delete pdf_canvas_link: %s", e, exc_info=True)
             raise
+
+    def _get_handwriting_notes(self, frame_ids: List[str]) -> List[Dict]:
+        if not frame_ids:
+            return []
+        try:
+            notes_resp = (
+                self.client.table("handwriting_notes")
+                .select("id,frame_id,metadata")
+                .in_("frame_id", frame_ids)
+                .execute()
+            )
+            return notes_resp.data or []
+        except Exception as e:
+            self.logger.error("Failed to fetch handwriting context: %s", e, exc_info=True)
+            return []
+
+    def get_handwriting_context_for_frames(
+        self,
+        frame_ids: List[str],
+        chunk_limit_per_note: int = 3,
+    ) -> List[Dict]:
+        notes = self._get_handwriting_notes(frame_ids)
+        if not notes:
+            return []
+
+        contexts: List[Dict] = []
+        for note in notes:
+            try:
+                chunks_resp = (
+                    self.client.table("handwriting_chunks")
+                    .select("id,chunk_text,chunk_index,metadata")
+                    .eq("note_id", note["id"])
+                    .order("chunk_index")
+                    .limit(chunk_limit_per_note)
+                    .execute()
+                )
+            except Exception as e:
+                self.logger.error("Failed to fetch handwriting chunks: %s", e, exc_info=True)
+                continue
+
+            for chunk in chunks_resp.data or []:
+                contexts.append(
+                    {
+                        "source_type": "handwriting",
+                        "frame_id": note["frame_id"],
+                        "note_id": note["id"],
+                        "chunk_id": chunk["id"],
+                        "text": chunk.get("chunk_text", ""),
+                        "metadata": chunk.get("metadata") or {},
+                        "chunk_index": chunk.get("chunk_index"),
+                    }
+                )
+        return contexts
+
+    def get_pdf_links(self, shape_ids: List[str]) -> List[Dict]:
+        if not shape_ids:
+            return []
+        try:
+            links_resp = (
+                self.client.table("pdf_canvas_links")
+                .select("shape_id,document_id,metadata")
+                .in_("shape_id", shape_ids)
+                .execute()
+            )
+            return links_resp.data or []
+        except Exception as e:
+            self.logger.error("Failed to fetch pdf links: %s", e, exc_info=True)
+            return []
+
+    def get_pdf_context_for_shapes(
+        self,
+        shape_ids: List[str],
+        chunk_limit_per_document: int = 3,
+    ) -> List[Dict]:
+        links = self.get_pdf_links(shape_ids)
+        if not links:
+            return []
+
+        doc_ids = list({link["document_id"] for link in links})
+        docs_lookup: Dict[str, Dict] = {}
+        if doc_ids:
+            try:
+                docs_resp = (
+                    self.client.table("pdf_documents")
+                    .select("id,filename")
+                    .in_("id", doc_ids)
+                    .execute()
+                )
+                for doc in docs_resp.data or []:
+                    docs_lookup[doc["id"]] = doc
+            except Exception as e:
+                self.logger.error("Failed to fetch pdf documents: %s", e, exc_info=True)
+
+        contexts: List[Dict] = []
+        for link in links:
+            document_id = link["document_id"]
+            shape_id = link["shape_id"]
+            try:
+                chunks_resp = (
+                    self.client.table("pdf_chunks")
+                    .select("id,chunk_text,page_number,metadata")
+                    .eq("document_id", document_id)
+                    .order("page_number")
+                    .limit(chunk_limit_per_document)
+                    .execute()
+                )
+            except Exception as e:
+                self.logger.error("Failed to fetch pdf chunks: %s", e, exc_info=True)
+                continue
+
+            for chunk in chunks_resp.data or []:
+                contexts.append(
+                    {
+                        "source_type": "pdf",
+                        "shape_id": shape_id,
+                        "document_id": document_id,
+                        "chunk_id": chunk["id"],
+                        "text": chunk.get("chunk_text", ""),
+                        "metadata": chunk.get("metadata") or {},
+                        "page_number": chunk.get("page_number"),
+                        "filename": docs_lookup.get(document_id, {}).get("filename"),
+                    }
+                )
+        return contexts
+
+    def get_context_for_shape_ids(
+        self,
+        shape_ids: List[str],
+        handwriting_limit_per_note: int = 3,
+        pdf_limit_per_document: int = 3,
+    ) -> List[Dict]:
+        contexts: List[Dict] = []
+        contexts.extend(
+            self.get_handwriting_context_for_frames(shape_ids, chunk_limit_per_note=handwriting_limit_per_note)
+        )
+        contexts.extend(
+            self.get_pdf_context_for_shapes(shape_ids, chunk_limit_per_document=pdf_limit_per_document)
+        )
+        return contexts
+
+    def search_handwriting_context(
+        self,
+        frame_ids: List[str],
+        query_embedding: List[float],
+        limit_per_note: int = 5,
+        threshold: float = 0.2,
+    ) -> List[Dict]:
+        notes = self._get_handwriting_notes(frame_ids)
+        if not notes:
+            return []
+
+        matches: List[Dict] = []
+        for note in notes:
+            try:
+                resp = self.client.rpc(
+                    "match_handwriting_chunks",
+                    {
+                        "query_embedding": query_embedding,
+                        "match_threshold": threshold,
+                        "match_count": limit_per_note,
+                        "filter_note_id": note["id"],
+                    },
+                ).execute()
+            except Exception as e:
+                self.logger.error("Handwriting match RPC failed: %s", e, exc_info=True)
+                continue
+
+            for row in resp.data or []:
+                matches.append(
+                    {
+                        "source_type": "handwriting",
+                        "frame_id": note["frame_id"],
+                        "note_id": note["id"],
+                        "chunk_id": row["id"],
+                        "text": row.get("chunk_text", ""),
+                        "metadata": row.get("metadata") or {},
+                        "similarity": row.get("similarity"),
+                    }
+                )
+        return matches
+
+    def search_pdf_context(
+        self,
+        shape_ids: List[str],
+        query_embedding: List[float],
+        limit_per_document: int = 5,
+        threshold: float = 0.2,
+    ) -> List[Dict]:
+        links = self.get_pdf_links(shape_ids)
+        if not links:
+            return []
+
+        doc_lookup: Dict[str, Dict] = {}
+        doc_ids = list({link["document_id"] for link in links})
+        if doc_ids:
+            try:
+                docs_resp = (
+                    self.client.table("pdf_documents")
+                    .select("id,filename")
+                    .in_("id", doc_ids)
+                    .execute()
+                )
+                for doc in docs_resp.data or []:
+                    doc_lookup[doc["id"]] = doc
+            except Exception as e:
+                self.logger.error("Failed to fetch pdf documents: %s", e, exc_info=True)
+
+        matches: List[Dict] = []
+        for link in links:
+            try:
+                resp = self.client.rpc(
+                    "match_pdf_chunks",
+                    {
+                        "query_embedding": query_embedding,
+                        "match_threshold": threshold,
+                        "match_count": limit_per_document,
+                        "filter_document_id": link["document_id"],
+                    },
+                ).execute()
+            except Exception as e:
+                self.logger.error("PDF match RPC failed: %s", e, exc_info=True)
+                continue
+
+            for row in resp.data or []:
+                matches.append(
+                    {
+                        "source_type": "pdf",
+                        "shape_id": link["shape_id"],
+                        "document_id": link["document_id"],
+                        "chunk_id": row["id"],
+                        "text": row.get("chunk_text", ""),
+                        "metadata": row.get("metadata") or {},
+                        "page_number": row.get("page_number"),
+                        "filename": doc_lookup.get(link["document_id"], {}).get("filename"),
+                        "similarity": row.get("similarity"),
+                    }
+                )
+        return matches
+
+    def search_context_for_shape_ids(
+        self,
+        shape_ids: List[str],
+        query_embedding: List[float],
+        handwriting_limit_per_note: int = 5,
+        pdf_limit_per_document: int = 5,
+        threshold: float = 0.2,
+    ) -> List[Dict]:
+        matches: List[Dict] = []
+        matches.extend(
+            self.search_handwriting_context(
+                shape_ids, query_embedding, limit_per_note=handwriting_limit_per_note, threshold=threshold
+            )
+        )
+        matches.extend(
+            self.search_pdf_context(
+                shape_ids, query_embedding, limit_per_document=pdf_limit_per_document, threshold=threshold
+            )
+        )
+        # sort by similarity descending if available
+        matches.sort(key=lambda x: x.get("similarity", 0), reverse=True)
+        return matches
     
     def similarity_search(
         self, 

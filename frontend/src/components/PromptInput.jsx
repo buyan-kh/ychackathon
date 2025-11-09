@@ -109,10 +109,41 @@ export default function PromptInput({ focusEventName }) {
     };
   }, [focusEventName]);
 
+  const resolveSelectionForContext = useCallback(() => {
+    const selectedIds = editor.getSelectedShapeIds();
+    if (!selectedIds.length) return [];
+
+    const resolved = new Set();
+
+    selectedIds.forEach((id) => {
+      const shape = editor.getShape(id);
+      if (!shape) return;
+
+      let currentShape = shape;
+      // Walk up to find a handwriting frame if applicable
+      while (currentShape) {
+        if (
+          currentShape.type === 'frame' &&
+          currentShape.meta?.handwritingNoteId
+        ) {
+          resolved.add(currentShape.id);
+          return;
+        }
+        const parent = editor.getShapeParent(currentShape);
+        if (!parent) break;
+        currentShape = parent;
+      }
+
+      resolved.add(shape.id);
+    });
+
+    return Array.from(resolved);
+  }, [editor]);
+
   const createAITextShape = async (promptText) => {
     if (!promptText.trim()) return;
 
-    const selectedShapeIds = editor.getSelectedShapeIds();
+    const selectedShapeIds = resolveSelectionForContext();
     const c1ShapeId = createShapeId();
     
     // Calculate optimal position for the new shape
@@ -159,7 +190,10 @@ export default function PromptInput({ focusEventName }) {
       const response = await fetch(`${apiUrl}/api/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: promptText }),
+        body: JSON.stringify({
+          prompt: promptText,
+          shape_ids: selectedShapeIds.length ? selectedShapeIds : undefined,
+        }),
       });
 
       if (!response.ok) {

@@ -52,6 +52,27 @@ app.add_middleware(
 class PromptRequest(BaseModel):
     prompt: str
     context: str | None = None
+    shape_ids: Optional[List[str]] = None
+
+
+def format_selection_context(entries: List[Dict]) -> str:
+    if not entries:
+        return ""
+    lines = []
+    for idx, entry in enumerate(entries, start=1):
+        snippet = (entry.get("text") or "").strip().replace("\n", " ")
+        snippet = " ".join(snippet.split())
+        if entry.get("source_type") == "handwriting":
+            label = f"Handwriting frame {entry.get('frame_id')}"
+        else:
+            doc_label = entry.get("filename") or entry.get("document_id")
+            page = entry.get("page_number")
+            page_suffix = f" (page {page})" if page is not None else ""
+            label = f"PDF {doc_label}{page_suffix}"
+        similarity = entry.get("similarity")
+        sim_text = f" [similarity {similarity:.2f}]" if isinstance(similarity, (int, float)) else ""
+        lines.append(f"{idx}. {label}{sim_text}: {snippet}")
+    return "Use the following canvas context when answering:\n" + "\n".join(lines)
 
 @app.get("/")
 async def root():
@@ -145,6 +166,29 @@ async def get_or_create_video_room(request: VideoRoomRequest):
 async def ask_stream(request: PromptRequest):
     """Stream Thesys C1 generative UI response"""
     from openai import AsyncOpenAI
+
+    selected_shape_ids = request.shape_ids or []
+    selection_context_entries: List[Dict] = []
+    selection_context_text = ""
+
+    if selected_shape_ids:
+        logger.info("ask_stream received %d selected shapes", len(selected_shape_ids))
+        try:
+            query_embedding = embedding_gen.generate_embeddings([request.prompt])[0]
+            selection_context_entries = storage.search_context_for_shape_ids(
+                selected_shape_ids,
+                query_embedding,
+                handwriting_limit_per_note=5,
+                pdf_limit_per_document=5,
+                threshold=0.2,
+            )
+        except Exception as e:
+            logger.error("Failed generating embeddings or searching context: %s", e, exc_info=True)
+            selection_context_entries = storage.get_context_for_shape_ids(selected_shape_ids)
+
+        selection_context_text = format_selection_context(selection_context_entries)
+    else:
+        logger.info("ask_stream invoked without selected shapes")
     
     async def generate_c1_response():
         try:
@@ -178,6 +222,12 @@ When answering questions:
                     "role": "system",
                     "content": f"Additional context: {request.context}"
                 })
+
+            if selection_context_text:
+                messages.append({
+                    "role": "system",
+                    "content": selection_context_text
+                })
             
             # Create streaming completion
             stream = await client.chat.completions.create(
@@ -187,6 +237,9 @@ When answering questions:
             )
             
             # Stream the response
+            if selection_context_entries:
+                yield f"data: {json.dumps({'context_entries': selection_context_entries})}\n\n"
+
             async for chunk in stream:
                 if chunk.choices and len(chunk.choices) > 0:
                     delta = chunk.choices[0].delta
