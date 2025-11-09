@@ -1,26 +1,26 @@
 [
   {
     "content": "Configure PDF.js worker for react-pdf",
-    "status": "in_progress"
+    "status": "completed"
   },
   {
     "content": "Create PdfViewer component with Document and Page from react-pdf",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Add zoom controls and page navigation to PdfViewer",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Render uploaded PDFs on canvas as overlay elements",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Add drag and close functionality for PDF viewers",
-    "status": "pending"
+    "status": "completed"
   },
   {
     "content": "Test PDF rendering with uploaded documents",
-    "status": "pending"
+    "status": "in_progress"
   }
 ]
