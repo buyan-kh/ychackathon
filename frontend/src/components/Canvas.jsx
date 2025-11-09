@@ -20,6 +20,13 @@ import "tldraw/tldraw.css";
 
 const FOCUS_EVENT_NAME = "focus-prompt-input";
 const DEFAULT_ROOM_ID = "default";
+const TYPED_NOTE_PADDING = 24;
+const TYPED_NOTE_MIN_WIDTH = 240;
+const TYPED_NOTE_MIN_HEIGHT = 160;
+const TYPED_NOTE_MAX_WIDTH = 900;
+const TYPED_NOTE_MAX_CHARS_FOR_WIDTH = 600;
+const TYPED_NOTE_MIN_CONTENT_WIDTH =
+  TYPED_NOTE_MIN_WIDTH - TYPED_NOTE_PADDING * 2;
 
 function CustomUI() {
   return (
@@ -79,6 +86,56 @@ const collectTextShapeIds = (seedIds, editor) => {
   }
 
   return Array.from(textIds);
+};
+
+const clampNumber = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const isTypedNoteFrame = (shape) =>
+  shape?.type === "frame" && shape.meta?.typedNoteId === shape.id;
+
+const getTypedFrameIdFromParent = (editor, parentId) => {
+  if (!parentId) return null;
+  const parentShape = editor.getShape(parentId);
+  return isTypedNoteFrame(parentShape) ? parentShape.id : null;
+};
+
+const getTypedFrameIdForSnapshot = (editor, snapshot) => {
+  if (!snapshot) return null;
+  if (snapshot.parentId) {
+    const parentFrameId = getTypedFrameIdFromParent(editor, snapshot.parentId);
+    if (parentFrameId) {
+      return parentFrameId;
+    }
+  }
+
+  if (snapshot.meta?.typedFrameId && editor.getSortedChildIdsForParent) {
+    const childIds =
+      editor.getSortedChildIdsForParent(snapshot.meta.typedFrameId) || [];
+    if (Array.isArray(childIds) && childIds.includes(snapshot.id)) {
+      return snapshot.meta.typedFrameId;
+    }
+  }
+
+  return null;
+};
+
+const computeTypedNoteWidthLimit = (charCount) => {
+  if (typeof charCount !== "number" || Number.isNaN(charCount)) {
+    return TYPED_NOTE_MIN_WIDTH;
+  }
+  const limitedChars = clampNumber(
+    charCount,
+    0,
+    TYPED_NOTE_MAX_CHARS_FOR_WIDTH
+  );
+  if (limitedChars === 0) {
+    return TYPED_NOTE_MIN_WIDTH;
+  }
+  const ratio = limitedChars / TYPED_NOTE_MAX_CHARS_FOR_WIDTH;
+  return (
+    TYPED_NOTE_MIN_WIDTH +
+    ratio * (TYPED_NOTE_MAX_WIDTH - TYPED_NOTE_MIN_WIDTH)
+  );
 };
 
 export default function Canvas() {
@@ -166,6 +223,52 @@ export default function Canvas() {
 
     // Add listener to prevent resizing of groups with noResize meta flag
     editor.sideEffects.registerBeforeChangeHandler("shape", (prev, next) => {
+      if (!next) {
+        return next;
+      }
+
+      if (next.type === "text") {
+        const prevTypedFrameId = getTypedFrameIdForSnapshot(editor, prev);
+
+        if (prevTypedFrameId) {
+          if (next.parentId !== prevTypedFrameId) {
+            return {
+              ...next,
+              parentId: prevTypedFrameId,
+              meta: {
+                ...next.meta,
+                typedFrameId: prevTypedFrameId,
+              },
+            };
+          }
+
+          if (next.meta?.typedFrameId !== prevTypedFrameId) {
+            return {
+              ...next,
+              meta: {
+                ...next.meta,
+                typedFrameId: prevTypedFrameId,
+              },
+            };
+          }
+        } else if (next.parentId) {
+          const typedParentId = getTypedFrameIdFromParent(
+            editor,
+            next.parentId
+          );
+
+          if (typedParentId && next.meta?.typedFrameId !== typedParentId) {
+            return {
+              ...next,
+              meta: {
+                ...next.meta,
+                typedFrameId: typedParentId,
+              },
+            };
+          }
+        }
+      }
+
       // Check if this is a group with noResize flag
       if (next.type === "group" && next.meta?.noResize) {
         // If size changed, revert to previous size
@@ -424,25 +527,73 @@ export default function Canvas() {
     const textShapes = gatherTextShapesUnderFrame(editor, frameId);
     if (!textShapes.length) return;
 
+    const totalChars = textShapes.reduce(
+      (sum, entry) => sum + (entry.text?.length ?? 0),
+      0
+    );
+    const widthLimit = computeTypedNoteWidthLimit(totalChars);
+    const targetContentWidth = Math.max(
+      TYPED_NOTE_MIN_CONTENT_WIDTH,
+      widthLimit - TYPED_NOTE_PADDING * 2
+    );
+
     editor.run(() => {
       const frameBounds = editor.getShapePageBounds(frameId);
       if (!frameBounds) return;
 
       let newWidth = 0;
       let newHeight = 0;
-      const padding = 24;
 
-      textShapes.forEach(({ bounds }) => {
+      textShapes.forEach((entry) => {
+        const shape = editor.getShape(entry.id);
+        if (!shape || shape.type !== "text") return;
+
+        const needsWidthUpdate =
+          shape.props?.autoSize !== false ||
+          Math.abs((shape.props?.w ?? 0) - targetContentWidth) > 1;
+        const needsMetaUpdate = shape.meta?.typedFrameId !== frameId;
+
+        if (needsWidthUpdate || needsMetaUpdate) {
+          const updatePayload = { id: shape.id, type: "text" };
+          let shouldUpdate = false;
+
+          if (needsWidthUpdate) {
+            updatePayload.props = {
+              ...shape.props,
+              autoSize: false,
+              w: targetContentWidth,
+            };
+            shouldUpdate = true;
+          }
+
+          if (needsMetaUpdate) {
+            updatePayload.meta = {
+              ...shape.meta,
+              typedFrameId: frameId,
+            };
+            shouldUpdate = true;
+          }
+
+          if (shouldUpdate) {
+            editor.updateShape(updatePayload);
+          }
+        }
+
+        const bounds = editor.getShapePageBounds(entry.id);
         if (!bounds) return;
         const relativeRight = bounds.x + bounds.w - frameBounds.x;
         const relativeBottom = bounds.y + bounds.h - frameBounds.y;
-        newWidth = Math.max(newWidth, relativeRight + padding);
-        newHeight = Math.max(newHeight, relativeBottom + padding);
+        newWidth = Math.max(newWidth, relativeRight + TYPED_NOTE_PADDING);
+        newHeight = Math.max(newHeight, relativeBottom + TYPED_NOTE_PADDING);
       });
 
-      const minWidth = 240;
-      const minHeight = 160;
-      const finalWidth = Math.max(newWidth, minWidth);
+      const minWidth = TYPED_NOTE_MIN_WIDTH;
+      const minHeight = TYPED_NOTE_MIN_HEIGHT;
+      const unclampedWidth = Math.max(newWidth, minWidth);
+      const finalWidth = Math.max(
+        minWidth,
+        Math.min(unclampedWidth, widthLimit)
+      );
       const finalHeight = Math.max(newHeight, minHeight);
 
       if (
@@ -471,23 +622,25 @@ export default function Canvas() {
     }
 
     const payloadShapes = textShapes.map((entry) => {
-      // Debug: log what we're extracting
+      const liveShape = editor.getShape(entry.id);
+      const mergedProps = {
+        ...(liveShape?.props ?? entry.props ?? {}),
+        text: entry.text,
+      };
+
       console.log("Text shape entry:", {
         id: entry.id,
         text: entry.text,
-        props: entry.props,
-        fullEntry: entry,
+        props: mergedProps,
+        original: entry,
       });
-      
+
       return {
         shapeId: entry.id,
         text: entry.text,
         order: entry.order,
         // Include the extracted text inside props as a fallback for the backend
-        props: {
-          ...entry.props,
-          text: entry.text,
-        },
+        props: mergedProps,
       };
     });
 
@@ -884,84 +1037,99 @@ export default function Canvas() {
     </div>
   );
 }
-  const autoFrameTypedText = async (editor, seedTextIds) => {
-    if (!editor) return null;
 
-    const baseIds = seedTextIds ?? editor.getSelectedShapeIds();
-    if (!baseIds.length) return null;
+const autoFrameTypedText = async (editor, seedTextIds) => {
+  if (!editor) return null;
 
-    const textIds = collectTextShapeIds(baseIds, editor);
-    if (!textIds.length) return null;
+  const baseIds = seedTextIds ?? editor.getSelectedShapeIds();
+  if (!baseIds.length) return null;
 
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
+  const textIds = collectTextShapeIds(baseIds, editor);
+  if (!textIds.length) return null;
 
-    textIds.forEach((id) => {
-      const bounds = editor.getShapePageBounds(id);
-      if (!bounds) return;
-      minX = Math.min(minX, bounds.x);
-      minY = Math.min(minY, bounds.y);
-      maxX = Math.max(maxX, bounds.x + bounds.w);
-      maxY = Math.max(maxY, bounds.y + bounds.h);
-    });
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
 
-    if (
-      !isFinite(minX) ||
-      !isFinite(minY) ||
-      !isFinite(maxX) ||
-      !isFinite(maxY)
-    ) {
-      console.warn("Unable to calculate typed note bounds for selection");
-      return null;
-    }
+  textIds.forEach((id) => {
+    const bounds = editor.getShapePageBounds(id);
+    if (!bounds) return;
+    minX = Math.min(minX, bounds.x);
+    minY = Math.min(minY, bounds.y);
+    maxX = Math.max(maxX, bounds.x + bounds.w);
+    maxY = Math.max(maxY, bounds.y + bounds.h);
+  });
 
-    const padding = 24;
-    minX -= padding;
-    minY -= padding;
-    maxX += padding;
-    maxY += padding;
+  if (
+    !isFinite(minX) ||
+    !isFinite(minY) ||
+    !isFinite(maxX) ||
+    !isFinite(maxY)
+  ) {
+    console.warn("Unable to calculate typed note bounds for selection");
+    return null;
+  }
 
-    const frameWidth = maxX - minX;
-    const frameHeight = maxY - minY;
-    const boundsPayload = {
+  const padding = TYPED_NOTE_PADDING;
+  minX -= padding;
+  minY -= padding;
+  maxX += padding;
+  maxY += padding;
+
+  const frameWidth = maxX - minX;
+  const frameHeight = maxY - minY;
+  const boundsPayload = {
+    x: minX,
+    y: minY,
+    w: frameWidth,
+    h: frameHeight,
+  };
+
+  let frameId = null;
+
+  editor.run(() => {
+    frameId = createShapeId();
+    editor.createShape({
+      id: frameId,
+      type: "frame",
       x: minX,
       y: minY,
-      w: frameWidth,
-      h: frameHeight,
-    };
-
-    let frameId = null;
-
-    editor.run(() => {
-      frameId = createShapeId();
-      editor.createShape({
-        id: frameId,
-        type: "frame",
-        x: minX,
-        y: minY,
-        props: {
-          w: frameWidth,
-          h: frameHeight,
-          name: "Typed Note",
-        },
-        meta: {
-          typedNoteId: frameId,
-        },
-      });
-
-      editor.reparentShapes(textIds, frameId);
-      editor.setSelectedShapes([frameId]);
+      props: {
+        w: frameWidth,
+        h: frameHeight,
+        name: "Typed Note",
+      },
+      meta: {
+        typedNoteId: frameId,
+      },
     });
 
-    if (!frameId) {
-      return null;
-    }
+    editor.reparentShapes(textIds, frameId);
 
-    return {
-      frameId,
-      textIds,
-      bounds: boundsPayload,
-    };
+    textIds.forEach((textId) => {
+      const textShape = editor.getShape(textId);
+      if (!textShape || textShape.type !== "text") return;
+      editor.updateShape({
+        id: textShape.id,
+        type: "text",
+        meta: {
+          ...textShape.meta,
+          typedFrameId: frameId,
+        },
+      });
+    });
+
+    editor.setSelectedShapes([frameId]);
+  });
+
+  if (!frameId) {
+    return null;
+  }
+
+  return {
+    frameId,
+    textIds,
+    bounds: boundsPayload,
   };
+};
