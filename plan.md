@@ -118,8 +118,54 @@
 
 ---
 
+### Phase 3.2: Image Capture & Upload ✅ COMPLETED
+**Status:** COMPLETED - Feature fully functional
+
+**Achievements:**
+- ✅ Extended auto-frame feature to capture PNG snapshots of framed handwriting
+- ✅ Implemented automatic upload to backend server after frame creation
+- ✅ Backend endpoint for receiving and storing handwriting images
+- ✅ File storage system with organized directory structure
+- ✅ Async image capture and upload without blocking UI
+
+**Implementation Details:**
+
+**Frontend (`/app/frontend/src/components/Canvas.jsx`):**
+- Made `autoFrameHandwriting()` async and return frameId
+- Created `captureAndUploadFrame()` helper function that:
+  - Uses `editor.exportToBlob()` to capture frame as PNG (2x scale, with background)
+  - Creates FormData with image blob, frameId, and timestamp
+  - Uploads to `/api/handwriting-upload` endpoint
+  - Includes error handling and console logging
+- Updated 's' key action to await frame creation and trigger upload
+- All operations remain wrapped in `editor.run()` for proper history/sync
+
+**Backend (`/app/backend/server.py`):**
+- Added `POST /api/handwriting-upload` endpoint
+- Accepts multipart form data (file, frameId, timestamp)
+- Saves PNG files to `/app/backend/uploads/handwriting/` directory
+- Generates filenames using frameId to avoid collisions
+- Returns JSON response with success status and file path
+- Installed `aiofiles` dependency for async file operations
+
+**User Stories Completed:**
+1. ✅ As a user, when I press 's' to frame handwriting, a snapshot is automatically captured
+2. ✅ As a user, the captured image is uploaded to the server without blocking my work
+3. ✅ As a developer, I can access stored handwriting images in `/app/backend/uploads/handwriting/`
+4. ✅ As a user, I receive console feedback about upload success/failure
+
+**Technical Details:**
+- Image format: PNG with 2x scale for high quality
+- Upload directory: `/app/backend/uploads/handwriting/`
+- Filename format: `{frameId}.png`
+- Backend dependency: `aiofiles==25.1.0`
+- Frontend API: `editor.exportToBlob()` from tldraw v4
+- Error handling: Non-blocking with console logging
+
+---
+
 ### Phase 3: Features & Hardening (IN PROGRESS)
-**Status:** PARTIALLY COMPLETED (Phase 3.1 done, remaining tasks ready to start)
+**Status:** PARTIALLY COMPLETED (Phase 3.1 & 3.2 done, remaining tasks ready to start)
 
 **Priority Tasks:**
 1. **User Presence Implementation** (HIGH)
@@ -220,9 +266,10 @@
 - **Persistence:** Canvas state saves to MongoDB and restores on page refresh
 - **Testing:** 87% overall test pass rate (100% backend, 95% frontend basic functionality)
 - **Auto-Frame Feature:** Keyboard shortcut 's' to frame handwriting strokes (non-resizable, movable)
+- **Image Capture:** Automatic PNG snapshot capture and upload to backend server
 
 ### 🚧 In Progress
-- None (Phase 3.1 completed, Phase 3 remaining tasks ready to start)
+- None (Phase 3.1 & 3.2 completed, Phase 3 remaining tasks ready to start)
 
 ### 📋 Next Up (Phase 3 Remaining)
 1. Implement user presence with collaborative cursors
@@ -251,6 +298,12 @@
 - ✅ Behavior: Grouped frame is movable but not resizable
 - ✅ Integration: Works with undo, delete, and multiplayer sync
 
+### Phase 3.2 (ACHIEVED ✅)
+- ✅ Image Capture: PNG snapshots captured automatically after framing
+- ✅ Upload: Images uploaded to backend without blocking UI
+- ✅ Storage: Files saved to organized directory structure
+- ✅ Error Handling: Non-blocking with console logging
+
 ### Phase 3 Remaining (TARGET)
 - Real-time: Two or more clients observe each other's edits within 300ms median
 - Presence: Users see each other's cursors with names and colors
@@ -272,6 +325,7 @@
 - **Framework:** FastAPI 0.110.1
 - **WebSocket:** uvicorn[standard] with websockets support
 - **Database:** MongoDB (motor async driver)
+- **File Storage:** Local filesystem with aiofiles
 - **Language:** Python 3.11
 
 ### Frontend
@@ -296,6 +350,7 @@
 - `GET /api/health` - Health check
 - `GET /api/sync/rooms/{room_id}/snapshot` - Get latest canvas snapshot
 - `POST /api/sync/rooms/{room_id}/apply` - Save canvas snapshot
+- `POST /api/handwriting-upload` - Upload handwriting frame image (Phase 3.2)
 
 ### WebSocket Endpoint
 - `WS /api/ws/rooms/{room_id}` - Real-time collaboration WebSocket
@@ -329,7 +384,18 @@
 - `Delete` / `Backspace` - Delete selection
 
 ### Custom Shortcuts
-- `S` - Auto-frame selected handwriting strokes (Phase 3.1)
+- `S` - Auto-frame selected handwriting strokes + capture & upload image (Phase 3.1 & 3.2)
+
+---
+
+## File Storage
+
+### Handwriting Images
+- **Directory:** `/app/backend/uploads/handwriting/`
+- **Format:** PNG (2x scale)
+- **Naming:** `{frameId}.png`
+- **Created:** Automatically on 's' key press after framing
+- **Access:** Local filesystem, expandable to cloud storage (S3, etc.)
 
 ---
 
@@ -347,6 +413,9 @@
 - `rooms` - Canvas snapshots (roomId, snapshot, version, created_at, updated_at)
 - `operations` - Operation log (room_id, op_id, snapshot, version, timestamp)
 
+### File System
+- `/app/backend/uploads/handwriting/` - Handwriting frame images (PNG)
+
 ---
 
 ## Resources
@@ -356,4 +425,5 @@
 - **Preview URL:** https://drawsync.preview.emergentagent.com
 - **tldraw Documentation:** https://tldraw.dev/docs
 - **tldraw v4 API:** https://tldraw.dev/reference/editor
-- **Auto-Frame Implementation:** `/app/frontend/src/components/Canvas.jsx` (lines 21-120)
+- **Auto-Frame Implementation:** `/app/frontend/src/components/Canvas.jsx` (lines 21-210)
+- **Upload Endpoint:** `/app/backend/server.py` (lines 151-180)
