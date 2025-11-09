@@ -34,7 +34,7 @@ export default function AIChatOverlay({ editor }) {
     if (!promptText.trim() || isLoading) return;
     
     setIsLoading(true);
-    const noteId = editor.createShapeId();
+    const noteId = createShapeId();
     
     // Get viewport center
     const viewport = editor.getViewportPageBounds();
