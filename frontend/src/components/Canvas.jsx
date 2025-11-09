@@ -4,6 +4,7 @@ import { useSyncDemo } from '@tldraw/sync';
 import { createShapeId } from '@tldraw/editor';
 import PromptInput from './PromptInput';
 import { PdfUploadButton } from './PdfUploadButton';
+import C1PlusButton from './C1PlusButton';
 import { PdfShapeUtil } from '../shapeUtils/PdfShapeUtil';
 import { VideoCallShapeUtil } from '../shapeUtils/VideoCallShapeUtil';
 import { C1ResponseShapeUtil } from '../shapeUtils/C1ResponseShapeUtil';
@@ -17,6 +18,7 @@ function CustomUI() {
   return (
     <>
       <PromptInput focusEventName={FOCUS_EVENT_NAME} />
+      <C1PlusButton />
     </>
   );
 }
