@@ -133,7 +133,14 @@ export default function PromptInput({ focusEventName }) {
         width: isFocused ? '50%' : '400px',
         background: '#FFFFFF',
         color: '#111827',
-        zIndex: 1000,
+        zIndex: 10000,
+        pointerEvents: 'all',
+      }}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (inputRef.current && !isFocused) {
+          inputRef.current.focus();
+        }
       }}
       onSubmit={(e) => {
         e.preventDefault();
