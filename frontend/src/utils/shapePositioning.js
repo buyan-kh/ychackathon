@@ -59,7 +59,38 @@ export function getOptimalShapePosition(editor, options) {
     };
   }
   
-  // Try placing to the right of the rightmost shape
+  // First, try to place near viewport center (prioritize visible area)
+  const viewportCenterPositions = [
+    {
+      x: viewportBounds.center.x - width / 2,
+      y: viewportBounds.center.y - height / 2,
+    },
+    {
+      x: viewportBounds.center.x - width / 2 + width + padding,
+      y: viewportBounds.center.y - height / 2,
+    },
+    {
+      x: viewportBounds.center.x - width / 2,
+      y: viewportBounds.center.y - height / 2 + height + padding,
+    },
+    {
+      x: viewportBounds.center.x - width / 2 - width - padding,
+      y: viewportBounds.center.y - height / 2,
+    },
+    {
+      x: viewportBounds.center.x - width / 2,
+      y: viewportBounds.center.y - height / 2 - height - padding,
+    },
+  ];
+  
+  for (const pos of viewportCenterPositions) {
+    if (!hasCollision(pos.x, pos.y, width, height)) {
+      return pos;
+    }
+  }
+  
+  // If viewport center is occupied, try placing to the right of the rightmost shape
+  // BUT only if it's reasonably close to viewport
   const rightmostShape = existingBounds.reduce((max, bounds) =>
     bounds.right > max.right ? bounds : max
   );
@@ -68,8 +99,15 @@ export function getOptimalShapePosition(editor, options) {
     y: rightmostShape.y,
   };
   
-  // Check for collisions (no viewport restriction - allow placing outside viewport)
-  if (!hasCollision(rightPosition.x, rightPosition.y, width, height)) {
+  // Only use this position if it's within reasonable distance of viewport
+  const maxDistanceFromViewport = viewportBounds.w * 2;
+  const distanceFromViewport = Math.max(
+    0,
+    rightPosition.x - (viewportBounds.x + viewportBounds.w)
+  );
+  
+  if (distanceFromViewport < maxDistanceFromViewport && 
+      !hasCollision(rightPosition.x, rightPosition.y, width, height)) {
     return rightPosition;
   }
   
